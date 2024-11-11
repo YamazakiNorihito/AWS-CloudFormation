@@ -1,0 +1,79 @@
+# aws cloudformation deploy  \
+#     --stack-name "site-deployment-stack"  \
+#     --template-file ./static-site-s3-vpc-template.yaml.yaml  \
+#     --parameter-overrides  \
+#         VpcId="vpc-hogehoge"  \
+#         SubnetIds="subnet-hogehoge"  \
+#         AlbSecurityGroupId="sg-hogehoge"  \
+#         EnvironmentName=""  \
+#     --region "ap-northeast-1" 
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: The ID of the VPC where the application is deployed
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: The IDs of the public subnets
+  AlbSecurityGroupId:
+    Type: String
+    Description: The ID of the security group associated with the Application Load Balancer (ALB)
+  DomainName:
+    Description: The domain name of the static site
+    Type: String
+    Default: 'example.com'
+
+Resources:
+  StaticSiteBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref DomainName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  StaticSiteBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref StaticSiteBucket
+      PolicyDocument:
+        Id: RestrictAccessToVPCEndpoint
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowVPCEndpointAccess
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${StaticSiteBucket}/*'
+            Condition:
+              StringEquals:
+                aws:SourceVpce: !Ref S3VPCEndpoint
+
+  S3VPCEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      SubnetIds: !Ref SubnetIds
+      PrivateDnsEnabled: false
+      VpcEndpointType: Interface
+      SecurityGroupIds:
+        - !Ref AlbSecurityGroupId
+
+Outputs:
+  StaticSiteURL:
+    Value: !GetAtt StaticSiteBucket.WebsiteURL
+    Description: The website endpoint of the static site bucket
+
+  StaticSiteSecureURL:
+    Value: !Sub 'https://${StaticSiteBucket.DomainName}'
+    Description: The secure HTTPS endpoint of the static site bucket

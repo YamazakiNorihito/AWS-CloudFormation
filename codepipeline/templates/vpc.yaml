@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+  TemplateBucket:
+    Type: String
+    Description: "The S3 bucket where the templates are stored"
+  TemplateKey:
+    Type: String
+    Description: "The S3 bucket where the templates are stored"
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags: 
+        - Key: "Name"
+          Value:  !Sub "vpc-${EnvironmentName}"
+
+  SubnetStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/subnet.yaml"
+      Parameters:
+        VpcId:  !Ref VPC 
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+Outputs:
+  VpcId:
+    Description: The ID of the VPC
+    Value: !Ref VPC
+
+  VpcCidrBlock:
+    Description: The primary IPv4 CIDR block for the VPC
+    Value: !GetAtt VPC.CidrBlock
+
+  VpcCidrBlockAssociations:
+    Description: The association IDs of the IPv4 CIDR blocks for the VPC
+    Value: !Join [",", !GetAtt VPC.CidrBlockAssociations]
+
+  DefaultNetworkAcl:
+    Description: The ID of the default network ACL for the VPC
+    Value: !GetAtt VPC.DefaultNetworkAcl
+
+  DefaultSecurityGroup:
+    Description: The ID of the default security group for the VPC
+    Value: !GetAtt VPC.DefaultSecurityGroup

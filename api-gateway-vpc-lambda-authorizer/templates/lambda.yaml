@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  TemplateBucket:
+    Type: String
+    Description: "The S3 bucket where the templates are stored"
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+  VpcId:
+    Type: List<AWS::EC2::VPC::Id>
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "List of subnet IDs for Lambda VPC configuration"
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: "List of security group IDs for Lambda VPC configuration"
+Resources:
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: DenyEC2FromLambdaCode
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Deny"
+                Action: 
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSubnets
+                  - ec2:DetachNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+                Condition:
+                  ArnEquals:
+                    lambda:SourceFunctionArn: 
+                      - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-lambda"
+        - PolicyName: AllowOnlySpecificVPCConfig
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:UpdateFunctionConfiguration
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    lambda:VpcIds: !Ref VpcId
+                    lambda:SubnetIds: !Ref SubnetIds
+                    lambda:SecurityGroupIds: !Ref SecurityGroupIds
+
+  FunctionStack:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${EnvironmentName}-lambda"
+      Runtime: provided.al2023
+      Architectures:
+        - x86_64
+      Handler: bootstrap
+      Role: !GetAtt Role.Arn
+      Timeout: 30
+      PackageType: Zip
+      Code:
+        S3Bucket: !Ref TemplateBucket
+        S3Key:  "lambda/lambda.zip"
+      LoggingConfig:
+        LogGroup: !Ref LambdaLogGroup
+      VpcConfig:
+        SubnetIds: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+      Environment:
+        Variables:
+          SAMPLE_ENV: "Helio World"
+  LambdaLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${EnvironmentName}-lambda"
+      RetentionInDays: 1
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+Outputs:
+  Arn:
+    Value: !GetAtt 'FunctionStack.Arn'
+  Name:
+    Value: !Ref 'FunctionStack'

@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet::Id
+
+Resources:
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-natgw1-eip"
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-natgw1"
+
+Outputs:
+  NatGateway1EIP:
+    Description: The Elastic IP address for NatGateway1
+    Value: !Ref NatGateway1EIP
+    Export:
+      Name: !Sub "${EnvironmentName}-NatGateway1EIP"
+
+  NatGateway1EIPAllocationId:
+    Description: The Allocation ID of the Elastic IP for NatGateway1
+    Value: !GetAtt NatGateway1EIP.AllocationId
+    Export:
+      Name: !Sub "${EnvironmentName}-NatGateway1EIPAllocationId"
+
+  NatGateway1Id:
+    Description: The ID of NatGateway1
+    Value: !Ref NatGateway1
+    Export:
+      Name: !Sub "${EnvironmentName}-NatGateway1Id"
+
+  NatGateway1PublicIp:
+    Description: The public IP address of NatGateway1
+    Value: !GetAtt NatGateway1EIP.PublicIp
+    Export:
+      Name: !Sub "${EnvironmentName}-NatGateway1PublicIp"

@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnetAZ1CIDR:
+    Type: String
+    Default: 10.0.1.0/24
+  PublicSubnetAZ2CIDR:
+    Type: String
+    Default: 10.0.2.0/24
+  PrivateSubnetAZ1CIDR:
+    Type: String
+    Default: 10.0.3.0/24
+  PrivateSubnetAZ2CIDR:
+    Type: String
+    Default: 10.0.4.0/24
+
+  TemplateBucket:
+    Type: String
+
+Resources:
+  VPCStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/vpc.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcCIDR: !Ref VpcCIDR
+
+  SubnetStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/subnet.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        PublicSubnetAZ1CIDR: !Ref PublicSubnetAZ1CIDR
+        PublicSubnetAZ2CIDR: !Ref PublicSubnetAZ2CIDR
+        PrivateSubnetAZ1CIDR: !Ref PrivateSubnetAZ1CIDR
+        PrivateSubnetAZ2CIDR: !Ref PrivateSubnetAZ2CIDR
+
+  InternetGatewayStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/internet-gateway.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+
+  NatGatewayStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: InternetGatewayStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/nat-gateway.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        PublicSubnet1: !GetAtt SubnetStack.Outputs.PublicSubnetAZ1Id
+        PublicSubnet2: !GetAtt SubnetStack.Outputs.PublicSubnetAZ2Id
+
+  RouteStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/route.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        InternetGatewayId: !GetAtt InternetGatewayStack.Outputs.InternetGatewayId
+        PublicSubnet1Id: !GetAtt SubnetStack.Outputs.PublicSubnetAZ1Id
+        PublicSubnet2Id: !GetAtt SubnetStack.Outputs.PublicSubnetAZ2Id
+        PrivateSubnet1Id: !GetAtt SubnetStack.Outputs.PrivateSubnetAZ1Id
+        PrivateSubnet2Id: !GetAtt SubnetStack.Outputs.PrivateSubnetAZ2Id
+        NatGateway1Id: !GetAtt NatGatewayStack.Outputs.NatGateway1Id
+        NatGateway2Id: !GetAtt NatGatewayStack.Outputs.NatGateway2Id
+
+  SecurityGroupStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/security.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId

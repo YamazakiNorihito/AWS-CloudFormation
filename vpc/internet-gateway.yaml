@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+Resources:
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "igw-${EnvironmentName}"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VpcId
+
+Outputs:
+  # Internet Gateway Outputs
+  InternetGatewayId:
+    Description: The ID of the Internet Gateway
+    Value: !Ref InternetGateway
+
+  InternetGatewayAttachmentVpcId:
+    Description: The ID of the VPC attached to the Internet Gateway
+    Value: !Ref VpcId
+
+  InternetGatewayAttachmentId:
+    Description: The ID of the Internet Gateway attachment
+    Value: !Ref InternetGatewayAttachment

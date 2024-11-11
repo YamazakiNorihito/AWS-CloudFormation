@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  InternetGatewayId:
+    Type: String
+  PublicSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+
+  PrivateSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+
+  NatGateway1Id:
+    Type: String
+
+Resources:
+  ##############################
+  # パブリック用ルートテーブル
+  ##############################
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-public-rt"
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGatewayId
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1Id
+
+  ##############################
+  # プライベート用ルートテーブル
+  ##############################
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-rt1"
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1Id
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1Id
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-private-rt2"
+
+Outputs:
+  PublicRouteTableId:
+    Description: The ID of the public route table
+    Value: !Ref PublicRouteTable
+    Export:
+      Name: !Sub "${EnvironmentName}-PublicRouteTableId"
+
+  DefaultPublicRouteId:
+    Description: The ID of the default public route
+    Value: !Ref DefaultPublicRoute
+    Export:
+      Name: !Sub "${EnvironmentName}-DefaultPublicRouteId"
+
+  PublicSubnet1RouteTableAssociationId:
+    Description: The ID of the public subnet 1 route table association
+    Value: !Ref PublicSubnet1RouteTableAssociation
+    Export:
+      Name: !Sub "${EnvironmentName}-PublicSubnet1RouteTableAssociationId"
+
+  PrivateRouteTable1Id:
+    Description: The ID of the private route table 1
+    Value: !Ref PrivateRouteTable1
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivateRouteTable1Id"
+
+  DefaultPrivateRoute1Id:
+    Description: The ID of the default private route 1
+    Value: !Ref DefaultPrivateRoute1
+    Export:
+      Name: !Sub "${EnvironmentName}-DefaultPrivateRoute1Id"
+
+  PrivateSubnet1RouteTableAssociationId:
+    Description: The ID of the private subnet 1 route table association
+    Value: !Ref PrivateSubnet1RouteTableAssociation
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivateSubnet1RouteTableAssociationId"
+
+  PrivateRouteTable2Id:
+    Description: The ID of the private route table 2
+    Value: !Ref PrivateRouteTable2
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivateRouteTable2Id"

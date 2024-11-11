@@ -1,0 +1,149 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetAZ1CIDR:
+    Type: String
+  PublicSubnetAZ2CIDR:
+    Type: String
+  PrivateSubnetAZ1CIDR:
+    Type: String
+  PrivateSubnetAZ2CIDR:
+    Type: String
+
+Resources:
+  # パブリックサブネット (AZ1)
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      CidrBlock: !Ref PublicSubnetAZ1CIDR
+      MapPublicIpOnLaunch: true
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "public-subnet-az1-${EnvironmentName}"
+
+  # パブリックサブネット (AZ2)
+  PublicSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      CidrBlock: !Ref PublicSubnetAZ2CIDR
+      MapPublicIpOnLaunch: true
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "public-subnet-az2-${EnvironmentName}"
+
+  # プライベートサブネット (AZ1)
+  PrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      CidrBlock: !Ref PrivateSubnetAZ1CIDR
+      MapPublicIpOnLaunch: false
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "private-subnet-az1-${EnvironmentName}"
+
+  # プライベートサブネット (AZ2)
+  PrivateSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      CidrBlock: !Ref PrivateSubnetAZ2CIDR
+      MapPublicIpOnLaunch: false
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "private-subnet-az2-${EnvironmentName}"
+
+Outputs:
+  # パブリックサブネット (AZ1) の出力
+  PublicSubnetAZ1Id:
+    Description: The ID of the public subnet in AZ1
+    Value: !Ref PublicSubnetAZ1
+
+  PublicSubnetAZ1AvailabilityZone:
+    Description: The Availability Zone of the public subnet in AZ1
+    Value: !GetAtt PublicSubnetAZ1.AvailabilityZone
+
+  PublicSubnetAZ1CidrBlock:
+    Description: The IPv4 CIDR block of the public subnet in AZ1
+    Value: !GetAtt PublicSubnetAZ1.CidrBlock
+
+  PublicSubnetAZ1VpcId:
+    Description: The VPC ID of the public subnet in AZ1
+    Value: !GetAtt PublicSubnetAZ1.VpcId
+
+  # パブリックサブネット (AZ2) の出力
+  PublicSubnetAZ2Id:
+    Description: The ID of the public subnet in AZ2
+    Value: !Ref PublicSubnetAZ2
+
+  PublicSubnetAZ2AvailabilityZone:
+    Description: The Availability Zone of the public subnet in AZ2
+    Value: !GetAtt PublicSubnetAZ2.AvailabilityZone
+
+  PublicSubnetAZ2CidrBlock:
+    Description: The IPv4 CIDR block of the public subnet in AZ2
+    Value: !GetAtt PublicSubnetAZ2.CidrBlock
+
+  PublicSubnetAZ2VpcId:
+    Description: The VPC ID of the public subnet in AZ2
+    Value: !GetAtt PublicSubnetAZ2.VpcId
+
+  # プライベートサブネット (AZ1) の出力
+  PrivateSubnetAZ1Id:
+    Description: The ID of the private subnet in AZ1
+    Value: !Ref PrivateSubnetAZ1
+
+  PrivateSubnetAZ1AvailabilityZone:
+    Description: The Availability Zone of the private subnet in AZ1
+    Value: !GetAtt PrivateSubnetAZ1.AvailabilityZone
+
+  PrivateSubnetAZ1CidrBlock:
+    Description: The IPv4 CIDR block of the private subnet in AZ1
+    Value: !GetAtt PrivateSubnetAZ1.CidrBlock
+
+  PrivateSubnetAZ1VpcId:
+    Description: The VPC ID of the private subnet in AZ1
+    Value: !GetAtt PrivateSubnetAZ1.VpcId
+
+  # プライベートサブネット (AZ2) の出力
+  PrivateSubnetAZ2Id:
+    Description: The ID of the private subnet in AZ2
+    Value: !Ref PrivateSubnetAZ2
+
+  PrivateSubnetAZ2AvailabilityZone:
+    Description: The Availability Zone of the private subnet in AZ2
+    Value: !GetAtt PrivateSubnetAZ2.AvailabilityZone
+
+  PrivateSubnetAZ2CidrBlock:
+    Description: The IPv4 CIDR block of the private subnet in AZ2
+    Value: !GetAtt PrivateSubnetAZ2.CidrBlock
+
+  PrivateSubnetAZ2VpcId:
+    Description: The VPC ID of the private subnet in AZ2
+    Value: !GetAtt PrivateSubnetAZ2.VpcId

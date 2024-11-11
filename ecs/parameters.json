@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "VPCId",
+    "ParameterValue": "vpc-090e53ca9b866cd47"
+  },
+  {
+    "ParameterKey": "SubnetIds",
+    "ParameterValue": "subnet-0dd9f37d3263c1ba1"
+  },
+  {
+    "ParameterKey": "AssignPublicIp",
+    "ParameterValue": "ENABLED"
+  }
+]

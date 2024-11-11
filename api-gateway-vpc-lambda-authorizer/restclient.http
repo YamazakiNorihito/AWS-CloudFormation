@@ -1,0 +1,20 @@
+
+@id=w8aqku6p70
+@region=us-east-2
+@endpoint=https://{{id}}.execute-api.{{region}}.amazonaws.com/sample/google/.well-known/openid-configuration
+
+### allow
+GET {{endpoint}}
+Authorization: allow
+
+### deny
+GET {{endpoint}}
+Authorization: deny
+
+### unauthorized
+GET {{endpoint}}
+Authorization: unauthorized
+
+### other
+GET {{endpoint}}
+Authorization: other

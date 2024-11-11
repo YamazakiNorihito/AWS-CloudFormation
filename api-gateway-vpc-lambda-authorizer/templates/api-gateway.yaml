@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  EnvironmentName:
+    Type: String
+  LambdaArn:
+    Type: String
+  LambdaAuthorizerArn:
+    Type: String
+
+Resources:
+  RestApi:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: !Sub '${EnvironmentName}-rest-api'
+      BinaryMediaTypes:
+        - "image/gif"
+        - "image/png"
+        - "image/jpeg"
+        - "image/webp"
+      Tags:
+        - Key: "Name"
+          Value: !Ref EnvironmentName
+
+  ApiResourceGoogle:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: "google"
+      RestApiId: !Ref RestApi
+
+  ApiResourceWellKnown:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref ApiResourceGoogle
+      PathPart: ".well-known"
+      RestApiId: !Ref RestApi
+
+  ApiResourceOpenId:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref ApiResourceWellKnown
+      PathPart: "openid-configuration"
+      RestApiId: !Ref RestApi
+  
+  Method:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref ApiResourceOpenId
+      HttpMethod: "GET"
+      AuthorizerId: !Ref Authorizer
+      AuthorizationType: CUSTOM
+      #AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: "{\"statusCode\": 200}"
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: ""
+            ResponseParameters:
+              "method.response.header.Access-Control-Allow-Headers": "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            "method.response.header.Access-Control-Allow-Headers": true
+
+  LambdaInvokePermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref LambdaArn
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/GET/google/.well-known/openid-configuration"
+
+  DevelopDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref RestApi
+    DependsOn:
+      - Method
+  DevelopStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: "sample"
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref DevelopDeployment
+      CacheClusterEnabled: false
+      Variables: 
+        env: "sample"
+      TracingEnabled: true
+
+  Authorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      AuthorizerResultTtlInSeconds: 300
+      AuthorizerUri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaAuthorizerArn}/invocations"
+      IdentitySource: method.request.header.authorization
+      #IdentityValidationExpression: '^Bearer [-0-9a-zA-Z\.]*$'
+      Name: !Sub '${EnvironmentName}-custom-authorizer'
+      RestApiId: !Ref RestApi
+      Type: TOKEN
+  AuthorizerLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaAuthorizerArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/authorizers/${Authorizer}"
+Outputs:
+  RestApiId:
+    Value: !Ref RestApi
+  ApiGatewayInvokeURL:
+    Value: !Join 
+      - ""
+      - - "https://"
+        - !Ref RestApi
+        - ".execute-api."
+        - !Ref "AWS::Region"
+        - ".amazonaws.com/"
+        - !Ref DevelopStage
+    Export:
+      Name: ApiGatewayInvokeURL

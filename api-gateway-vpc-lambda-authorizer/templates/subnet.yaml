@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetAZ1CIDR:
+    Type: String
+    Default: 10.0.1.0/24
+  PrivateSubnetAZ1CIDR:
+    Type: String
+    Default: 10.0.3.0/24
+
+Resources:
+  # パブリックサブネット (AZ1)
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Ref PublicSubnetAZ1CIDR
+      MapPublicIpOnLaunch: true
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${EnvironmentName}-public-subnet-az1"
+
+  # プライベートサブネット (AZ1)
+  PrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Ref PrivateSubnetAZ1CIDR
+      MapPublicIpOnLaunch: false
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${EnvironmentName}-private-subnet-az1"
+
+Outputs:
+  PublicSubnetAZ1Id:
+    Description: The ID of the public subnet in AZ1
+    Value: !Ref PublicSubnetAZ1
+    Export:
+      Name: !Sub "${EnvironmentName}-PubAz1SubnetId"
+
+  PublicSubnetAZ1AvailabilityZone:
+    Description: The Availability Zone of the public subnet in AZ1
+    Value: !GetAtt PublicSubnetAZ1.AvailabilityZone
+    Export:
+      Name: !Sub "${EnvironmentName}-PubAz1Az"
+
+  PublicSubnetAZ1CidrBlock:
+    Description: The IPv4 CIDR block of the public subnet in AZ1
+    Value: !GetAtt PublicSubnetAZ1.CidrBlock
+    Export:
+      Name: !Sub "${EnvironmentName}-PubAz1Cidr"
+
+  PublicSubnetAZ1VpcId:
+    Description: The VPC ID of the public subnet in AZ1
+    Value: !GetAtt PublicSubnetAZ1.VpcId
+    Export:
+      Name: !Sub "${EnvironmentName}-PubAz1VpcId"
+
+  PrivateSubnetAZ1Id:
+    Description: The ID of the private subnet in AZ1
+    Value: !Ref PrivateSubnetAZ1
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivAz1SubnetId"
+
+  PrivateSubnetAZ1AvailabilityZone:
+    Description: The Availability Zone of the private subnet in AZ1
+    Value: !GetAtt PrivateSubnetAZ1.AvailabilityZone
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivAz1Az"
+
+  PrivateSubnetAZ1CidrBlock:
+    Description: The IPv4 CIDR block of the private subnet in AZ1
+    Value: !GetAtt PrivateSubnetAZ1.CidrBlock
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivAz1Cidr"
+
+  PrivateSubnetAZ1VpcId:
+    Description: The VPC ID of the private subnet in AZ1
+    Value: !GetAtt PrivateSubnetAZ1.VpcId
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivAz1VpcId"

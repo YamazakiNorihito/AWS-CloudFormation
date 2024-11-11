@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  TemplateBucket:
+    Type: String
+  TemplateKey:
+    Type: String
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+
+Resources:
+  VPCStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/vpc.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+  SubnetStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/subnet.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+  NatGatewayStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: InternetGatewayStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/nat-gateway.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        PublicSubnet1: !GetAtt SubnetStack.Outputs.PublicSubnetAZ1Id
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+  InternetGatewayStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/internet-gateway.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+  RouteStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/route.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        InternetGatewayId: !GetAtt InternetGatewayStack.Outputs.InternetGatewayId
+        PublicSubnet1Id: !GetAtt SubnetStack.Outputs.PublicSubnetAZ1Id
+        PrivateSubnet1Id: !GetAtt SubnetStack.Outputs.PrivateSubnetAZ1Id
+        NatGateway1Id: !GetAtt NatGatewayStack.Outputs.NatGateway1Id
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+  SecurityGroupStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/security-group.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+  LambdaStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/lambda.yaml"
+      Parameters:
+        TemplateBucket: !Ref TemplateBucket
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        SubnetIds: !GetAtt SubnetStack.Outputs.PrivateSubnetAZ1Id
+        SecurityGroupIds: !GetAtt SecurityGroupStack.Outputs.SecurityGroupId
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+  LambdaAuthorizerStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/lambda-authorizer.yaml"
+      Parameters:
+        TemplateBucket: !Ref TemplateBucket
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        SubnetIds: !GetAtt SubnetStack.Outputs.PrivateSubnetAZ1Id
+        SecurityGroupIds: !GetAtt SecurityGroupStack.Outputs.SecurityGroupId
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+
+  ApiGatewayStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplateKey}/api-gateway.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        LambdaArn: !GetAtt LambdaStack.Outputs.Arn
+        LambdaAuthorizerArn: !GetAtt LambdaAuthorizerStack.Outputs.Arn
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
