@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  InternetGatewayId:
+    Type: String
+  PublicSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet2Id:
+    Type: AWS::EC2::Subnet::Id
+
+  PrivateSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnet2Id:
+    Type: AWS::EC2::Subnet::Id
+
+  NatGateway1Id:
+    Type: String
+  NatGateway2Id:
+    Type: String
+
+Resources:
+  ##############################
+  # パブリック用ルートテーブル
+  ##############################
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "public-rt-${EnvironmentName}"
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGatewayId
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1Id
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2Id
+
+  ##############################
+  # プライベート用ルートテーブル
+  ##############################
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "private-rt1-${EnvironmentName}"
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1Id
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1Id
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "private-rt2-${EnvironmentName}"
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2Id
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2Id
+
+Outputs:
+  # パブリック用ルートテーブル
+  PublicRouteTableId:
+    Description: The ID of the public route table
+    Value: !Ref PublicRouteTable
+
+  DefaultPublicRouteId:
+    Description: The ID of the default public route
+    Value: !Ref DefaultPublicRoute
+
+  PublicSubnet1RouteTableAssociationId:
+    Description: The ID of the public subnet 1 route table association
+    Value: !Ref PublicSubnet1RouteTableAssociation
+
+  PublicSubnet2RouteTableAssociationId:
+    Description: The ID of the public subnet 2 route table association
+    Value: !Ref PublicSubnet2RouteTableAssociation
+
+  # プライベート用ルートテーブル1
+  PrivateRouteTable1Id:
+    Description: The ID of the private route table 1
+    Value: !Ref PrivateRouteTable1
+
+  DefaultPrivateRoute1Id:
+    Description: The ID of the default private route 1
+    Value: !Ref DefaultPrivateRoute1
+
+  PrivateSubnet1RouteTableAssociationId:
+    Description: The ID of the private subnet 1 route table association
+    Value: !Ref PrivateSubnet1RouteTableAssociation
+
+  # プライベート用ルートテーブル2
+  PrivateRouteTable2Id:
+    Description: The ID of the private route table 2
+    Value: !Ref PrivateRouteTable2
+
+  DefaultPrivateRoute2Id:
+    Description: The ID of the default private route 2
+    Value: !Ref DefaultPrivateRoute2
+
+  PrivateSubnet2RouteTableAssociationId:
+    Description: The ID of the private subnet 2 route table association
+    Value: !Ref PrivateSubnet2RouteTableAssociation

@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  AssignPublicIp:
+    Type: String
+    Default: ENABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+  AppName:
+    Type: String
+    Default: sample-fargate-app
+  ListenerArn:
+    Type: String
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AppName}-cluster'
+      Tags:
+        - Key: "Name"
+          Value: !Sub "ecs-cluster-${EnvironmentName}"
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AppName}-ecsTaskExecutionRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: "Name"
+          Value: !Sub "ecs-task-execution-role-${EnvironmentName}"
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${AppName}/logs'
+      RetentionInDays: 7
+      Tags:
+        - Key: "Name"
+          Value: !Sub "log-group-${EnvironmentName}"
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AppName}-task'
+      Cpu: '256'
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Command:
+            - >-
+              /bin/sh -c "echo '<html> <head> <title>${AppName}</title>
+              <style>body {margin-top: 40px; background-color: #333;}
+              </style> </head><body> <div
+              style=color:white;text-align:center> <h1>${AppName}</h1>
+              <h2>Congratulations!</h2> <p>Your application is now running on
+              a container in Amazon ECS.</p> </div></body></html>' > 
+              /usr/local/apache2/htdocs/index.html && httpd-foreground"
+          EntryPoint:
+            - sh
+            - '-c'
+          Essential: true
+          Image: 'httpd:2.4'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: ecs
+          Name: !Ref AppName
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+      Tags:
+        - Key: "Name"
+          Value: !Sub "task-definition-${EnvironmentName}"
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${AppName} ECS Task Security Group"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      Tags:
+        - Key: "Name"
+          Value: !Sub "ecs-sg-${EnvironmentName}"
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: !Sub '${AppName}-service'
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 2
+      LoadBalancers:
+        - ContainerName: !Ref AppName
+          ContainerPort: 80
+          TargetGroupArn: !Ref TargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets: !Ref SubnetIds
+      Tags:
+        - Key: "Name"
+          Value: !Sub "ecs-service-${EnvironmentName}"
+  
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "tg-${AppName}"
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
+      Tags:
+        - Key: "Name"
+          Value: !Sub "target-group-${EnvironmentName}"
+
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ListenerArn
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          Values: ["/"]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup

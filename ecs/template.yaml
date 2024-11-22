@@ -1,0 +1,120 @@
+# deploy command
+# aws cloudformation create-stack --stack-name ecs-stack --template-body file://template.yaml --parameters file://parameters.json --region ap-northeast-1 --profile workday --capabilities CAPABILITY_NAMED_IAM
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Fargate サンプルテンプレート（ALBなし、デフォルトVPC使用）
+
+Parameters:
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: 使用するVPCのID（デフォルトVPC）
+    Default: default
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: 使用するサブネットのIDリスト（コンマ区切り）
+  AssignPublicIp:
+    Type: String
+    Default: ENABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Description: ECSタスクにパブリックIPを割り当てるか
+
+Resources:
+  ## ECSクラスターの作成
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-cluster'
+
+  ## ECSタスク実行ロールの設定
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-ecsTaskExecutionRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ## CloudWatch Log Group for ECS task logging
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: ecs/sample-fargate-app
+      RetentionInDays: 7
+
+  ## タスク定義の作成
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-task'
+      Cpu: '256'
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Command:
+            - >-
+              /bin/sh -c "echo '<html> <head> <title>Amazon ECS Sample
+              App</title> <style>body {margin-top: 40px; background-color:
+              #333;} </style> </head><body> <div
+              style=color:white;text-align:center> <h1>Amazon ECS Sample
+              App</h1> <h2>Congratulations!</h2> <p>Your application is now
+              running on a container in Amazon ECS.</p> </div></body></html>' > 
+              /usr/local/apache2/htdocs/index.html && httpd-foreground"
+          EntryPoint:
+            - sh
+            - '-c'
+          Essential: true
+          Image: 'httpd:2.4'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: ecs
+          Name: sample-fargate-app
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+
+  ## セキュリティグループの設定
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "ECS Task Security Group"
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ## ECSサービスの作成
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: !Sub '${AWS::StackName}-service'
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets: !Ref SubnetIds
