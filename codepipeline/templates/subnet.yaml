@@ -1,0 +1,12 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+Resources:
+  Subnet:
+    Type: AWS::EC2::Subnet 
+    Properties:
+      VpcId: !Ref VpcId 
+      CidrBlock: 10.0.0.2/16 

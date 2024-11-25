@@ -1,0 +1,10 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - aws s3 cp ./templates s3://$S3_BUCKET_NAME/templates --recursive
+artifacts:
+  files:
+    - vpc.yaml
+  base-directory: templates
