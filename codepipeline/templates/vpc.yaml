@@ -1,4 +1,4 @@
-# aws cloudformation deploy --stack-name "sandbox-teamc-deploy-infra-stack" --template-file ./vpc.yaml --capabilities CAPABILITY_NAMED_IAM --region "us-east-1" --profile "dev-medcom.ne.jp"
+# aws cloudformation deploy --stack-name "sandbox-deploy-infra-stack" --template-file ./vpc.yaml --capabilities CAPABILITY_NAMED_IAM --region "us-east-1" --profile "{profile}"
 AWSTemplateFormatVersion: '2010-09-09'
 
 Parameters:

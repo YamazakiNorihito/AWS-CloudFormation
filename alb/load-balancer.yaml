@@ -9,6 +9,21 @@ Parameters:
   LoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup::Id
     Description: Security group for the load balancer.
+  
+  # HTTPSリスナー用の設定で使用するSSL証明書のARN
+  #CertificateArn:
+  #  Type: String
+  #  Description: The ARN of the SSL certificate to use for HTTPS.
+
+  # Route53のDNSレコード設定に使用するカスタムドメイン名
+  #DomainName:
+  #  Type: String
+  #  Default: example.com
+
+  # Route53のホストゾーンID（ドメインに対応するホストゾーン）
+  #HostedZoneId:
+  #  Type: String
+  #  Default: Z03876891L8K7CPB7XTHP
 
 Resources:
   ApplicationLoadBalancer:
@@ -39,10 +54,14 @@ Resources:
             ContentType: text/plain
             MessageBody: "Not Found"
 
+  # HTTPSリスナーの設定
+  # HTTPSポート(443)でリスニングし、SSL証明書を使ってHTTPS通信を可能にする
   #ALBHTTPSListener:
   #  Type: AWS::ElasticLoadBalancingV2::Listener
   #  Properties:
   #    LoadBalancerArn: !Ref ApplicationLoadBalancer
+  #    Certificates:
+  #      - CertificateArn: !Ref CertificateArn
   #    Protocol: HTTPS
   #    Port: 443
   #    DefaultActions:
@@ -51,6 +70,18 @@ Resources:
   #          StatusCode: '404'
   #          ContentType: text/plain
   #          MessageBody: "Not Found"
+  
+  # Route 53のDNSレコードセットの作成
+  # 指定したドメイン名とALBのDNS名を紐付け、カスタムドメインでALBにアクセスできるようにする
+  #DNSRecordSet:
+  #  Type: "AWS::Route53::RecordSet"
+  #  Properties:
+  #    HostedZoneId: !Ref HostedZoneId
+  #    Name: !Ref DomainName
+  #    Type: "A"
+  #    AliasTarget:
+  #      DNSName: !GetAtt ApplicationLoadBalancer.DNSName
+  #      HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
 
 Outputs:
   LoadBalancerARN:

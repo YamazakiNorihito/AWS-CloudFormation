@@ -33,7 +33,7 @@ Resources:
   DeploymentRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: sandbox-teamc-cloudformation-deployment-role
+      RoleName: sandbox-cloudformation-deployment-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -43,7 +43,7 @@ Resources:
                 - cloudformation.amazonaws.com
             Action: 'sts:AssumeRole'
       Policies:
-        - PolicyName: SandboxTeamCPolicy
+        - PolicyName: SandboxPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:

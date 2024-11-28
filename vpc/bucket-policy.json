@@ -7,7 +7,7 @@
         "Service": "cloudformation.amazonaws.com"
       },
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::deploy-teamc-e2c5c500-77bd-4855-b437-f4c4cda3e3ca/*"
+      "Resource": "arn:aws:s3:::deploy-123456/*"
     }
   ]
 }
