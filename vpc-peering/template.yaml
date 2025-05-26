@@ -1,0 +1,202 @@
+# Deployコマンド
+# aws cloudformation deploy --stack-name "vpc-peering-stack" --template-file template.yaml --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides KeyName="{keyName}" --region {region} --profile {profileName}
+
+# ssh -i ./xxxxx.pem  ec2-user@{private ip|public ip}
+
+# VPC-BのEC2インスタンスにSSH接続するためpemをVPC-AのEC2インスタンスにコピーする
+# scp -i ~/.ssh/xxxxx.pem -o StrictHostKeyChecking=no ~/.ssh/xxxxx.pem ec2-user@<EC2のIPアドレス>:/home/ec2-user/
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "
+  Creates a VPC peering connection between two VPCs and deploys EC2 instances in the private subnet of each VPC.
+  Subnets, route tables, internet gateways, and security groups are automatically configured, and ICMP communication between VPCs is allowed."
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair (for potential SSH, optional if using SSM)
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    Description: EC2 instance type
+
+Resources:
+  # VPC1
+  VPC1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.240.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC1
+
+  VPC1Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      CidrBlock: 10.240.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: VPC1-Private-Subnet
+
+  VPC1RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+      Tags:
+        - Key: Name
+          Value: VPC1-RT
+
+  VPC1SubnetRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPC1Subnet
+      RouteTableId: !Ref VPC1RouteTable
+
+  # VPC2
+  VPC2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.241.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC2
+
+  VPC2Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      CidrBlock: 10.241.1.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: VPC2-Private-Subnet
+
+  VPC2RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC2
+      Tags:
+        - Key: Name
+          Value: VPC2-RT
+
+  VPC2SubnetRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPC2Subnet
+      RouteTableId: !Ref VPC2RouteTable
+
+  # VPC Peering
+  VPCPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref VPC1
+      PeerVpcId: !Ref VPC2
+      Tags:
+        - Key: Name
+          Value: VPC1-to-VPC2
+
+  # Peering routes
+  RouteVPC1toVPC2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPC1RouteTable
+      DestinationCidrBlock: 10.241.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeeringConnection
+
+  RouteVPC2toVPC1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPC2RouteTable
+      DestinationCidrBlock: 10.240.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeeringConnection
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC1
+      InternetGatewayId: !Ref InternetGateway
+
+  RouteToInternet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPC1RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Security Groups (ピアVPCからのICMP許可)
+  SG1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ICMP from VPC2
+      VpcId: !Ref VPC1
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.241.0.0/16
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.240.0.0/16
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  SG2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ICMP from VPC1
+      VpcId: !Ref VPC2
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.240.0.0/16
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.241.0.0/16
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  # EC2 Instances (プライベートサブネット)
+  Instance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}"
+      SubnetId: !Ref VPC1Subnet
+      SecurityGroupIds: [ !Ref SG1 ]
+
+  Instance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}"
+      SubnetId: !Ref VPC2Subnet
+      SecurityGroupIds: [ !Ref SG2 ]
+
+Outputs:
+  PeeringConnectionId:
+    Description: VPC Peering Connection ID
+    Value: !Ref VPCPeeringConnection
+  VPC1SubnetCIDR:
+    Value: !GetAtt VPC1Subnet.CidrBlock
+  VPC2SubnetCIDR:
+    Value: !GetAtt VPC2Subnet.CidrBlock
