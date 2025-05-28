@@ -1,0 +1,60 @@
+
+# aws cloudformation deploy --stack-name "gateway-vpc-endpoint-for-s3" --template-file template.yaml --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides VpcId="{VpcId}"  SubnetIds="{SubnetIds}"  SecurityGroupId="{SecurityGroupId}" --region {region} --profile {profileName}
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Grant access to S3 only from VPC2 using Gateway Endpoint and bucket policy.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC2 ID to grant access to S3
+
+  VPCRouteTableId:
+    Type: String
+    Description: The main route table ID for VPC2
+
+  BucketName:
+    Type: String
+    Description: The name of the S3 bucket to create and protect
+
+Resources:
+  GatewayVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcId: !Ref VpcId
+      RouteTableIds:
+        - !Ref VPCRouteTableId
+      VpcEndpointType: Gateway
+  
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccessFromVPC2Only
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Sub arn:aws:s3:::${BucketName}
+              - !Sub arn:aws:s3:::${BucketName}/*
+            Condition:
+              StringEquals:
+                aws:SourceVpc: !Ref VpcId
+
+Outputs:
+  S3BucketName:
+    Value: !Ref S3Bucket
+    Description: The name of the created S3 bucket
+
+  GatewayEndpointId:
+    Value: !Ref GatewayVPCEndpoint
+    Description: ID of the Gateway VPC Endpoint for S3
