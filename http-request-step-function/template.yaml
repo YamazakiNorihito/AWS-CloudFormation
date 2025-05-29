@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Sample template for a Step Functions workflow that calls an HTTP endpoint and saves the response to S3.
+
+Resources:
+  SampleEventsConnection:
+    Type: AWS::Events::Connection
+    Properties:
+      Name: sample-events-connection
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: sample-api-key
+          ApiKeyValue: sample-api-value
+
+  SampleResponseBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: sample-stepfunction-response-bucket
+
+  SampleStepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sample-stepfunction-state-machine-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SampleInvokeApiPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:RetrieveConnectionCredentials
+                  - events:InvokeApiDestination
+                Resource: !GetAtt SampleEventsConnection.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - states:InvokeHTTPEndpoint
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                Resource: !GetAtt SampleEventsConnection.SecretArn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${SampleResponseBucket}/*
+
+  SampleStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: sample-api-call-state-machine
+      RoleArn: !GetAtt SampleStepFunctionRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Sample: Call HTTP API and save response to S3",
+          "StartAt": "Call HTTP API",
+          "States": {
+            "Call HTTP API": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::http:invoke",
+              "Parameters": {
+                "ApiEndpoint": "https://accounts.google.com/.well-known/openid-configuration",
+                "Authentication": {
+                  "ConnectionArn": "${SampleEventsConnection.Arn}"
+                },
+                "Method": "GET"
+              },
+              "Next": "SaveResponseToS3"
+            },
+            "SaveResponseToS3": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+              "Parameters": {
+                "Bucket": "${SampleResponseBucket}",
+                "Key": "response.json",
+                "Body.$": "$.ResponseBody",
+                "ContentType": "application/json"
+              },
+              "End": true
+            }
+          }
+        }
+
+  SampleEventsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sample-stepfunction-events-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SampleStartExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref SampleStateMachine
+
+  SampleDailyScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: sample-daily-schedule-rule
+      Description: "Sample: Daily trigger for the Step Functions state machine"
+      ScheduleExpression: "cron(0 12 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Id: InvokeSampleStateMachine
+          Arn: !Ref SampleStateMachine
+          RoleArn: !GetAtt SampleEventsRole.Arn
