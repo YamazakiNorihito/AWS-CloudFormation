@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Simple WebSocket Chat</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #chat-container {
+            width: 380px;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #header {
+            padding: 18px 0;
+            text-align: center;
+            font-size: 22px;
+            font-weight: 600;
+            color: #222;
+            background: #f7f9fa;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        #server-config {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 14px 18px 10px 18px;
+            background: #f7f9fa;
+        }
+
+        #name-input,
+        #uri-input {
+            padding: 9px 12px;
+            font-size: 15px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: #fff;
+            outline: none;
+            transition: border 0.2s;
+        }
+
+        #name-input:focus,
+        #uri-input:focus {
+            border-color: #1a73e8;
+        }
+
+        #connect-button {
+            align-self: flex-end;
+            padding: 8px 18px;
+            font-size: 14px;
+            border: none;
+            background: #1a73e8;
+            color: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        #connect-button:hover {
+            background: #1765c1;
+        }
+
+        #status {
+            font-size: 13px;
+            color: #888;
+            padding: 8px 18px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #fafbfc;
+        }
+
+        #messages {
+            flex: 1;
+            padding: 16px 18px;
+            overflow-y: auto;
+            background: #f9fafb;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message-item {
+            align-self: flex-start;
+            padding: 8px 14px;
+            margin-bottom: 8px;
+            border-radius: 18px;
+            background: #e3f0fc;
+            font-size: 15px;
+            color: #222;
+            max-width: 80%;
+            word-break: break-word;
+        }
+
+        #input-area {
+            display: flex;
+            border-top: 1px solid #e5e7eb;
+            background: #f7f9fa;
+            padding: 10px 12px;
+        }
+
+        #input-area input[type="text"] {
+            flex: 1;
+            padding: 10px 14px;
+            font-size: 15px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            outline: none;
+            background: #fff;
+            margin-right: 8px;
+            transition: border 0.2s;
+        }
+
+        #input-area input[type="text"]:focus {
+            border-color: #1a73e8;
+        }
+
+        #send-button {
+            padding: 10px 18px;
+            font-size: 15px;
+            border: none;
+            background: #1a73e8;
+            color: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        #send-button:disabled {
+            background: #bcd5f6;
+            cursor: not-allowed;
+        }
+
+        #send-button:not(:disabled):hover {
+            background: #1765c1;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="chat-container">
+        <div id="header">Simple WebSocket Chat</div>
+        <div id="server-config">
+            <input type="text" id="name-input" placeholder="Name" />
+            <input type="text" id="uri-input" value="wss://{api-gateway-id}.execute-api.{region}.amazonaws.com/Prod" />
+            <button id="connect-button">Connect</button>
+        </div>
+        <div id="status">Connecting to WebSocket...</div>
+        <div id="messages"></div>
+        <div id="input-area">
+            <input type="text" id="message-input" placeholder="Type a message ..." autocomplete="off" />
+            <button id="send-button" disabled>Send</button>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            // ページ上の要素を取得
+            const statusDiv = document.getElementById('status');
+            const messagesDiv = document.getElementById('messages');
+            const inputField = document.getElementById('message-input');
+            const sendButton = document.getElementById('send-button');
+
+            let ws;         // WebSocket インスタンスを保持
+            let username;   // 接続時に設定されるユーザー名
+
+            /**
+             * WebSocket の初期化とイベント設定
+             */
+            function initWebSocket() {
+                // ユーザー名を入力欄から取得
+                username = document.getElementById('name-input').value.trim();
+                if (!username) {
+                    statusDiv.textContent = 'Invalid name';
+                    return;
+                }
+                // サーバーの URI を入力欄から取得
+                const serverUri = document.getElementById('uri-input').value.trim();
+                if (!serverUri) {
+                    statusDiv.textContent = 'Invalid URI';
+                    return;
+                }
+                statusDiv.textContent = 'Connecting to WebSocket...';
+                ws = new WebSocket(serverUri);
+
+                // 接続が開いたとき
+                ws.onopen = function () {
+                    statusDiv.textContent = 'Connected';
+                    sendButton.disabled = false;
+                };
+
+                // メッセージを受信したとき
+                ws.onmessage = function (event) {
+                    // event.data はサーバーから送られたそのままの文字列（ここでは Lambda の postToConnection で送った "data"）
+                    const text = event.data;
+                    appendMessage(text);
+                };
+
+                // 接続が閉じられたとき
+                ws.onclose = function (event) {
+                    statusDiv.textContent = 'Disconnected';
+                    sendButton.disabled = true;
+                    // 必要なら再接続処理を入れる
+                };
+
+                // エラーが発生したとき
+                ws.onerror = function (error) {
+                    console.error('WebSocket error:', error);
+                    statusDiv.textContent = 'Error';
+                };
+            }
+
+            /**
+             * メッセージを画面に追加するヘルパー
+             */
+            function appendMessage(text) {
+                const el = document.createElement('div');
+                el.className = 'message-item';
+                el.textContent = text;
+                messagesDiv.appendChild(el);
+                // スクロールを一番下に移動
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            /**
+             * Send ボタン押下時の処理
+             */
+            sendButton.addEventListener('click', function () {
+                const text = inputField.value.trim();
+                if (text === '' || ws.readyState !== WebSocket.OPEN) {
+                    return;
+                }
+                ws.send(JSON.stringify({
+                    action: 'sendmessage',
+                    data: username + ': ' + text
+                }));
+                // 送信後は入力欄をクリア
+                inputField.value = '';
+            });
+
+            // Enter キーでも送信できるようにする
+            inputField.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    sendButton.click();
+                }
+            });
+
+            // ページ読み込み後に WebSocket を初期化
+            window.addEventListener('load', initWebSocket);
+
+            // Connect ボタン押下時の処理
+            document.getElementById('connect-button').addEventListener('click', function () {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.close(); // 既存接続があれば切断
+                }
+                initWebSocket();
+            });
+        })();
+    </script>
+</body>
+
+</html>
