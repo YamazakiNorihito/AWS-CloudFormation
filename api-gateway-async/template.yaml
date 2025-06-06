@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Resources:
+
+  # ─────────────────────────────────────────────
+  # DynamoDB テーブル定義
+  # ─────────────────────────────────────────────
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Jobs
+      AttributeDefinitions:
+        - AttributeName: JobId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: JobId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TableClass: 'STANDARD'
+
+  # ─────────────────────────────────────────────
+  # Lambda 実行ロール定義
+  # ─────────────────────────────────────────────
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaDynamoDBPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt JobsTable.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # ─────────────────────────────────────────────
+  # 非同期ジョブ起動用 Lambda 関数
+  # ─────────────────────────────────────────────
+  AsyncLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: AsyncJobProcessor
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs20.x
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref JobsTable
+          TIMEOUT: "5"
+      Code:
+        ZipFile: |
+          const { DynamoDB } = require("@aws-sdk/client-dynamodb");
+          const { DynamoDBDocumentClient, PutCommand } = require("@aws-sdk/lib-dynamodb");
+
+          const TIMEOUT = parseInt(process.env.TIMEOUT || "5");
+          const TABLE_NAME = process.env.TABLE_NAME || "Jobs";
+
+          const ddbDocClient = DynamoDBDocumentClient.from(
+            new DynamoDB({ region: process.env.AWS_REGION })
+          );
+
+          const sleep = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+
+          exports.handler = async (event) => {
+            console.log("Received event:", JSON.stringify(event, null, 2));
+            const jobId = event?.parameters?.jobId ?? Date.now().toString();
+            const seconds = event?.parameters?.seconds ?? 1;
+
+            try {
+              if (seconds > TIMEOUT) {
+                throw new Error(`${seconds} is greater than ${TIMEOUT}`);
+              }
+
+              console.log(`Sleeping for ${seconds} seconds...`);
+              await sleep(seconds);
+
+              const message = `I slept for ${seconds} seconds`;
+
+              const command = new PutCommand({
+                TableName: TABLE_NAME,
+                Item: {
+                  JobId: jobId,
+                  Status: "Success",
+                  Results: { message },
+                  CreatedAt: new Date().toISOString()
+                }
+              });
+              await ddbDocClient.send(command);
+              console.log("Job completed and saved:", jobId);
+
+            } catch (error) {
+              console.error("Job failed:", error);
+              const command = new PutCommand({
+                TableName: TABLE_NAME,
+                Item: {
+                  JobId: jobId,
+                  Status: "Failed",
+                  Results: { message: error.message },
+                  CreatedAt: new Date().toISOString()
+                }
+              });
+              await ddbDocClient.send(command);
+            }
+
+            return;
+          };
+
+  # ─────────────────────────────────────────────
+  # API Gateway
+  # ─────────────────────────────────────────────
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: AsyncJobAPI
+
+  # /jobs リソース
+  JobsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: jobs
+
+  # /jobs/{id} リソース
+  JobIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref JobsResource
+      PathPart: "{id}"
+
+  # ─────────────────────────────────────────────
+  # POST /jobs メソッド
+  # ─────────────────────────────────────────────
+  PostJobsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref JobsResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub >-
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AsyncLambdaFunction.Arn}/invocations
+        RequestParameters:
+          integration.request.header.X-Amz-Invocation-Type: "'Event'"
+        RequestTemplates:
+          application/json: |
+            {
+              "parameters": $input.json('$')
+            }
+        IntegrationResponses:
+          - StatusCode: 202
+      MethodResponses:
+        - StatusCode: 202
+
+  # ─────────────────────────────────────────────
+  # GET /jobs/{id} メソッド
+  # ─────────────────────────────────────────────
+  GetJobMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref JobIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub >-
+          arn:aws:apigateway:${AWS::Region}:dynamodb:action/GetItem
+        Credentials: !GetAtt ApiGatewayDynamoRole.Arn
+        RequestTemplates:
+          application/json: |
+            {
+              "TableName": "Jobs",
+              "Key": {
+                "JobId": {
+                  "S": "$input.params('id')"
+                }
+              }
+            }
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                #set($item = $input.path('$.Item'))
+                #if($item)
+                  {
+                    "jobId": "$item.JobId.S",
+                    "status": "$item.Status.S",
+                    #if($item.Results)
+                      "results": {
+                        #foreach($k in $item.Results.M.keySet())
+                          "$k": "$item.Results.M.get($k).S"#if($foreach.hasNext),#end
+                        #end
+                      },
+                    #end
+                    "createdAt": "$item.CreatedAt.S"
+                  }
+                #else
+                  {
+                    "message": "Not found"
+                  }
+                #end
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+
+  AsyncLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AsyncLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/POST/jobs
+
+  # ─────────────────────────────────────────────
+  # API Gateway → DynamoDB への呼び出し用 IAM ロール
+  # ─────────────────────────────────────────────
+  ApiGatewayDynamoRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ApiGatewayDynamoRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ApiGatewayDynamoDBPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt JobsTable.Arn
+
+  # ─────────────────────────────────────────────
+  # API Deployment（Stage: prod）
+  # ─────────────────────────────────────────────
+  Deployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - PostJobsMethod
+      - GetJobMethod
+    Properties:
+      RestApiId: !Ref RestApi
+      StageName: prod
+
+Outputs:
+  ApiEndpoint:
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    Description: API Gateway endpoint

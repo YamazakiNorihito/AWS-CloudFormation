@@ -1,0 +1,17 @@
+@region=us-east-2
+@apigateway-id=	xm2ixu183i
+@stag=prod
+@base=https://{{apigateway-id}}.execute-api.{{region}}.amazonaws.com/{{stag}}
+
+###
+POST {{base}}/jobs
+Content-Type: application/json
+
+{
+  "jobId": "123456",
+  "seconds": 2
+}
+
+###
+GET  {{base}}/jobs/123456
+Content-Type: application/json
