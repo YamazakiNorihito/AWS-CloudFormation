@@ -1,7 +1,7 @@
 @region=us-east-2
 @apigateway-id=5f370zcz94
-@apigateway-id=prod
-@base=https://{{apigateway-id}}.execute-api.{{region}}.amazonaws.com/{{apigateway-id}}
+@stag=prod
+@base=https://{{apigateway-id}}.execute-api.{{region}}.amazonaws.com/{{stag}}
 ###
 GET {{base}}/test.png
 
