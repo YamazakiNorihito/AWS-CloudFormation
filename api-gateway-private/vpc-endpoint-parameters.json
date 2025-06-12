@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-{id}"
+  },
+  {
+    "ParameterKey": "SubnetIds",
+    "ParameterValue": "subnet-{id}"
+  },
+  {
+    "ParameterKey": "SecurityGroupId",
+    "ParameterValue": "sg-{id}"
+  }
+]

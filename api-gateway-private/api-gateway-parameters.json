@@ -1,0 +1,6 @@
+[
+  {
+    "ParameterKey": "VpcEndpointIds",
+    "ParameterValue": "vpce-{id}"
+  }
+]
