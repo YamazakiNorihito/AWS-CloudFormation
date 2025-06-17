@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  DomainName:
+    Type: String
+  DefaultSecurityGroupId:
+    Type: String
+  PrivateSubnetAZ1Id:
+    Type: String
+  PrivateSubnetAZ2Id:
+    Type: String
+  VpcId:
+    Type: String
+
+Resources:
+  S3VPCEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PrivateDnsEnabled: false
+      SecurityGroupIds: 
+        - !Ref DefaultSecurityGroupId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      SubnetIds: 
+        - !Ref PrivateSubnetAZ1Id
+        - !Ref PrivateSubnetAZ2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref DomainName
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  S3BucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Id: RestrictAccessToVPCEndpoint
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowVPCEndpointAccess
+            Principal: '*'
+            Action: 's3:GetObject'
+            Effect: Allow
+            Resource:
+              - !Sub 'arn:aws:s3:::${S3Bucket}'
+              - !Sub 'arn:aws:s3:::${S3Bucket}/*'
+            Condition:
+              StringEquals:
+                aws:SourceVpce: !Ref S3VPCEndpoint

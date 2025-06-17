@@ -1,0 +1,22 @@
+[
+  {
+    "ParameterKey": "DomainName",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "DefaultSecurityGroupId",
+    "ParameterValue": "sg-{id}"
+  },
+  {
+    "ParameterKey": "PrivateSubnetAZ1Id",
+    "ParameterValue": "subnet-{id}"
+  },
+  {
+    "ParameterKey": "PrivateSubnetAZ2Id",
+    "ParameterValue": "subnet-{id}"
+  },
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-{id}"
+  }
+]

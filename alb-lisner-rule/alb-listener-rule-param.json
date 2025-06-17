@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-{id}"
+  },
+  {
+    "ParameterKey": "VpcEndpointIPs",
+    "ParameterValue": "{ip1},{ip2}"
+  },
+  {
+    "ParameterKey": "AlbListenerArn",
+    "ParameterValue": "{arn:listener}"
+  }
+]
