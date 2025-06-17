@@ -1,0 +1,18 @@
+[
+  {
+    "ParameterKey": "VpnServerCertificateArn",
+    "ParameterValue": "{VpnServerCertificateArn}"
+  },
+  {
+    "ParameterKey": "VpnClientRootCertificateArn",
+    "ParameterValue": "{VpnClientRootCertificateArn}"
+  },
+  {
+    "ParameterKey": "VpnClientCidrBlock",
+    "ParameterValue": "10.8.0.0/22"
+  },
+  {
+    "ParameterKey": "Ec2KeyPairName",
+    "ParameterValue": "{Ec2KeyPairName}"
+  }
+]

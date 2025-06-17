@@ -1,0 +1,26 @@
+[
+  {
+    "ParameterKey": "VpnServerCertificateArn",
+    "ParameterValue": "{VpnServerCertificateArn}"
+  },
+  {
+    "ParameterKey": "VpnClientRootCertificateArn",
+    "ParameterValue": "{VpnClientRootCertificateArn}"
+  },
+  {
+    "ParameterKey": "VpnClientCidrBlock",
+    "ParameterValue": "10.8.0.0/22"
+  },
+  {
+    "ParameterKey": "ConnectionSubnetId",
+    "ParameterValue": "subnet-{id}"
+  },
+  {
+    "ParameterKey": "ConnectionSubnetId1",
+    "ParameterValue": "subnet-{id}"
+  },
+  {
+    "ParameterKey": "ConnectionTargetNetworkCidr",
+    "ParameterValue": "10.254.0.0/21"
+  }
+]

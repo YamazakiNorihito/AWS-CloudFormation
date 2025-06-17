@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  VpnServerCertificateArn:
+    Type: String
+  VpnClientRootCertificateArn:
+    Type: String
+  VpnClientCidrBlock:
+    Type: String
+  Ec2KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+  VpcCidrBlock:
+    Type: String
+    Default: "10.0.1.0/24"
+  DnsServers:
+    Type: CommaDelimitedList
+    Default: "10.0.1.2"
+
+Resources:
+  VPNVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: isolated-vpc
+
+  VPNSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPNVPC
+      CidrBlock: !Ref VpcCidrBlock
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: isolated-private-subnet
+
+  VPNRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPNVPC
+      Tags:
+        - Key: Name
+          Value: isolated-private-rt
+
+  VPNSubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref VPNSubnet
+      RouteTableId: !Ref VPNRouteTable
+
+  VPNSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH & ICMP within VPC
+      VpcId: !Ref VPNVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref VpcCidrBlock
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: !Ref VpcCidrBlock
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidrBlock
+      SecurityGroupEgress:
+        #- IpProtocol: -1
+        #  CidrIp: !Ref VpcCidrBlock
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  VPNSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Path: /
+
+  VPNInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref VPNSSMRole
+
+  VPNTestInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: "t3.micro"
+      KeyName: !Ref Ec2KeyPairName
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}"
+      SubnetId: !Ref VPNSubnet
+      SecurityGroupIds:
+        - !Ref VPNSecurityGroup
+      IamInstanceProfile: !Ref VPNInstanceProfile
+      Tags:
+        - Key: Name
+          Value: isolated-ec2
+
+  VPNClientEndpoint:
+    Type: AWS::EC2::ClientVpnEndpoint
+    Properties:
+      ClientCidrBlock: !Ref VpnClientCidrBlock
+      ServerCertificateArn: !Ref VpnServerCertificateArn
+      AuthenticationOptions:
+        - Type: certificate-authentication
+          MutualAuthentication:
+            ClientRootCertificateChainArn: !Ref VpnClientRootCertificateArn
+      ConnectionLogOptions:
+        Enabled: false
+      #TransportProtocol: udp
+      #DnsServers: !Ref DnsServers
+      #SplitTunnel: false
+      TagSpecifications:
+        - ResourceType: client-vpn-endpoint
+          Tags:
+            - Key: Name
+              Value: my-client-vpn
+  VPNClientNetworkAssociation:
+    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
+    Properties:
+      ClientVpnEndpointId: !Ref VPNClientEndpoint
+      SubnetId: !Ref VPNSubnet
+  VPNClientAuthorizationRule:
+    Type: AWS::EC2::ClientVpnAuthorizationRule
+    Properties:
+      ClientVpnEndpointId: !Ref VPNClientEndpoint
+      TargetNetworkCidr: !GetAtt VPNVPC.CidrBlock
+      AuthorizeAllGroups: true
