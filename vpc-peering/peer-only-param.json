@@ -1,0 +1,30 @@
+[
+  {
+    "ParameterKey": "SourceVpcId",
+    "ParameterValue": "vpc-{id}"
+  },
+  {
+    "ParameterKey": "SourceRouteTable",
+    "ParameterValue": "rtb-{id}"
+  },
+  {
+    "ParameterKey": "SourceCidrBlock",
+    "ParameterValue": "10.241.0.0/16"
+  },
+  {
+    "ParameterKey": "TargetVpcId",
+    "ParameterValue": "vpc-{id}"
+  },
+  {
+    "ParameterKey": "TargetRouteTable",
+    "ParameterValue": "rtb-{id}"
+  },
+  {
+    "ParameterKey": "TargetCidrBlock",
+    "ParameterValue": "10.254.0.0/21"
+  },
+  {
+    "ParameterKey": "ConnectionName",
+    "ParameterValue": "VPC2-To-{Target}"
+  }
+]

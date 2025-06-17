@@ -1,0 +1,51 @@
+# Deployコマンド
+# aws cloudformation deploy --stack-name "peer-only-param-stack" --template-file template.yaml --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides KeyName="{keyName}" --region {region} --profile {profileName}
+
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  SourceVpcId:
+    Type: String
+  SourceRouteTable:
+    Type: String
+  SourceCidrBlock:
+    Type: String
+  TargetVpcId:
+    Type: String
+  TargetRouteTable:
+    Type: String
+  TargetCidrBlock:
+    Type: String
+  ConnectionName:
+    Type: String
+
+Resources:
+
+  VpcPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref SourceVpcId
+      PeerVpcId: !Ref TargetVpcId
+      Tags:
+        - Key: Name
+          Value: !Ref ConnectionName
+
+  # Peering routes
+  RouteSourceToTarget:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref SourceRouteTable
+      DestinationCidrBlock: !Ref TargetCidrBlock
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+
+  RouteTargetToSource:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref TargetRouteTable
+      DestinationCidrBlock: !Ref SourceCidrBlock
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+
+Outputs:
+  VpcPeeringConnectionId:
+    Description: VPC Peering Connection ID
+    Value: !Ref VpcPeeringConnection
