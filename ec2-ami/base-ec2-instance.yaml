@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Launch an EC2 instance in the default VPC.
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair.
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet ID in the default VPC.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for the security group.
+
+Resources:
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH and HTTP access
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetId
+      ImageId: ami-054d057aaa6f1aa39
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      UserData: !Base64 |
+        #!/bin/bash
+        yum update -y
+        # Install CloudWatch Agent
+        yum install -y amazon-cloudwatch-agent
+
+        # Create CloudWatch Agent config file
+        cat <<EOF > /opt/aws/amazon-cloudwatch-agent/bin/config.json
+        {
+          "agent": {
+            "run_as_user": "root"
+          },
+          "logs": {
+            "logs_collected": {
+              "files": {
+                "collect_list": [
+                  {
+                    "file_path": "/var/log/messages",
+                    "log_group_name": "/ec2/EC2PlaygroundInstance/{instance_id}",
+                    "log_stream_name": "{hostname}/messages"
+                  },
+                  {
+                    "file_path": "/var/log/nginx/access.log",
+                    "log_group_name": "/ec2/EC2PlaygroundInstance/{instance_id}",
+                    "log_stream_name": "{hostname}/nginx-access.log"
+                  },
+                  {
+                    "file_path": "/var/log/yum.log",
+                    "log_group_name": "/ec2/EC2PlaygroundInstance/{instance_id}",
+                    "log_stream_name": "{hostname}/yum.log"
+                  },
+                  {
+                    "file_path": "/var/log/cloud-init-output.log",
+                    "log_group_name": "/ec2/EC2PlaygroundInstance/{instance_id}",
+                    "log_stream_name": "{hostname}/cloud-init-output.log"
+                  }
+                ]
+              }
+            }
+          }
+        }
+        EOF
+        # Start CloudWatch Agent
+        /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json -s
+
+        # Install Nginx (Amazon Linux 2 uses amazon-linux-extras)
+        sudo amazon-linux-extras install nginx1 -y
+        sudo systemctl enable nginx
+        sudo systemctl start nginx
+        sudo systemctl status nginx
+
+        # Create a sample index.html file
+        sudo tee /usr/share/nginx/html/index.html > /dev/null <<'EOT'
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8">
+          <title>EC2 Playground - Welcome!</title>
+          <style>
+            body { background: #232f3e; color: #fff; font-family: 'Segoe UI', sans-serif; text-align: center; padding: 50px;}
+            h1 { font-size: 3em; margin-bottom: 0.2em;}
+            .emoji { font-size: 4em; }
+            .box { background: #fff3; border-radius: 16px; display: inline-block; padding: 2em 3em; margin-top: 2em;}
+            .aws { color: #ff9900; font-weight: bold;}
+            .blink { animation: blink 1s steps(2, start) infinite;}
+            @keyframes blink { to { visibility: hidden; } }
+          </style>
+        </head>
+        <body>
+          <div class="box">
+            <div class="emoji">🚀🐧☁️</div>
+            <h1>EC2 Playgroundへようこそ！</h1>
+            <p>このサーバーは <span class="aws">AWS EC2</span> で<br>
+            <span class="blink">元気に稼働中！</span></p>
+            <p>nginxもバッチリ動いてます🎉</p>
+            <hr style="margin:2em 0;">
+            <p style="font-size:1.2em;">Enjoy your cloud journey!<br>Powered by <span class="aws">Amazon Web Services</span></p>
+            <p>あなたがアクセスしているドメイン: <span id="domain"></span></p>
+          </div>
+          <script>
+            document.getElementById('domain').textContent = window.location.hostname;
+          </script>
+        </body>
+        </html>
+        EOT
+      Tags:
+        - Key: Name
+          Value: BaseEC2Instance
+
+Outputs:
+  InstanceId:
+    Description: The ID of the launched EC2 instance
+    Value: !Ref EC2Instance
+  PublicIP:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
+  LogGroupName:
+    Description: CloudWatch Log Group Name for the instance
+    Value: !Sub "/ec2/EC2PlaygroundInstance/${EC2Instance}"
