@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+# aws cloudformation deploy --stack-name "cloudfront-stack" --template-file ./template.yaml --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
+# 実行完了後、index.htmlをS3バケットにアップロードする
+
+# aws cloudformation delete-stack --stack-name "cloudfront-stack"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '^[a-z][a-z0-9]*$'
+    Default: dev
+
+Resources:
+  # S3 Bucket for static content
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "static-content-${AWS::StackName}-${EnvironmentName}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # CloudFront Origin Access Control 
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "s3-origin-access-control-${AWS::StackName}-${EnvironmentName}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "CloudFront distribution for static website in ${EnvironmentName}"
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+          #- DELETE
+          - GET
+          - HEAD
+          - OPTIONS
+          #- PATCH
+          #- POST
+          #- PUT
+          CachedMethods:
+            - GET
+            - HEAD
+          TargetOriginId: s3-origin-id
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: allow-all
+          Compress: true
+          # 開発環境用の短いキャッシュTTL設定（本番環境では値を大きくすることを推奨）
+          MinTTL: 0
+          MaxTTL: 60
+          DefaultTTL: 0
+        Origins:
+          - Id: s3-origin-id
+            DomainName: !GetAtt S3Bucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
+            S3OriginConfig: {}
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  # S3 Bucket Policy to grant OAC access
+  MyS3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${S3Bucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+Outputs:
+  S3BucketName:
+    Value: !Ref S3Bucket
+    Export:
+      Name: !Sub "${AWS::StackName}-S3BucketName"
+  CloudFrontDomainName:
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudFrontDomainName"
