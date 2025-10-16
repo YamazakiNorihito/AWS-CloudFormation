@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "SubnetIds",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "DBPassword",
+    "ParameterValue": ""
+  }
+]

@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '^[a-z][a-z0-9]*$'
+    Default: dev
+
+  VpcId:
+    Type: String
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  DBPassword:
+    NoEcho: 'true'
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+
+  DBClass:
+    Default: db.t4g.small
+    Type: String
+  DBUsername:
+    Default: admin
+    NoEcho: 'true'
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+  DBAllocatedStorage:
+    Default: '20'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '1024'
+  
+  Engine:
+    Default: MySQL
+    Type: String
+    AllowedValues:
+      - MySQL
+  EngineVersion:
+    Default: 8.0.39
+    Type: String
+    AllowedValues:
+      - 8.0.39
+  DBParameterGroupName:
+    Default: default.mysql8.0
+    Type: String
+    AllowedValues:
+      - default.mysql8.0
+  OptionGroupName:
+    Default: default:mysql-8-0
+    Type: String
+    AllowedValues:
+      - default:mysql-8-0
+
+Resources:
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "DB SG for ${EnvironmentName}"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+    DeletionPolicy: Delete
+
+  DbKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountRoot
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: AllowRDSService
+            Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action:
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:CreateGrant
+              - kms:RetireGrant
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: '*'
+            Condition:
+              StringEquals:
+                kms:CallerAccount: !Ref AWS::AccountId
+                kms:ViaService: !Sub rds.${AWS::Region}.amazonaws.com
+      Tags:
+        - Key: Name
+          Value: !Sub "rds-kms-key-${EnvironmentName}"
+    DeletionPolicy: Delete
+
+  DbKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/rds-${EnvironmentName}
+      TargetKeyId: !Ref DbKmsKey
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "DB subnet group for ${EnvironmentName}"
+      SubnetIds: !Ref SubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub "db-subnet-${EnvironmentName}"
+    DeletionPolicy: Delete
+
+  DBInstance:
+    UpdateReplacePolicy: Delete
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: "MyDatabase"
+      DBInstanceIdentifier: !Sub "rds${EnvironmentName}"
+      Engine: !Ref Engine
+      EngineVersion: !Ref EngineVersion
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBInstanceClass: !Ref DBClass
+      VPCSecurityGroups: 
+        - !Ref DbSecurityGroup
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      DBParameterGroupName: !Ref DBParameterGroupName
+      OptionGroupName: !Ref OptionGroupName
+      AllocatedStorage: !Ref DBAllocatedStorage
+      BackupRetentionPeriod: 0
+      StorageType: gp2
+      StorageEncrypted: true
+      KmsKeyId: !GetAtt DbKmsKey.Arn
+      MultiAZ: false
+      PubliclyAccessible: false
+      DeletionProtection: false
+      CopyTagsToSnapshot: false
+      EnableCloudwatchLogsExports:
+        - audit
+        - error
+        - general
+        - slowquery
+    DeletionPolicy: Delete
+
+Outputs:
+  DbSecurityGroupId:
+    Value: !Ref DbSecurityGroup
+    Export:
+      Name: !Sub "SecurityGroupId-db-${EnvironmentName}"
+  EndpointAddress:
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub "DbEndpointAddress-${EnvironmentName}"
+  
