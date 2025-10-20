@@ -1,0 +1,15 @@
+{
+  "name": "lambda-function",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "install:dev": "../npm-install.sh"
+  },
+  "devDependencies": {
+    "axios": "^1.12.2",
+    "date-fns": "^4.1.0",
+    "lodash": "^4.17.21"
+  }
+}
