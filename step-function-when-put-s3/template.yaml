@@ -1,0 +1,322 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+
+  LambdaRuntime:
+    Type: String
+    Default: nodejs22.x
+    AllowedValues:
+      - nodejs22.x
+      - nodejs20.x
+
+Resources:
+  UploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "stepfunction-upload-bucket-${EnvironmentName}-${AWS::AccountId}"
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "stepfunction-lambda-execution-role-${EnvironmentName}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3ReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:HeadObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt UploadBucket.Arn
+                  - !Sub "${UploadBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+
+  Function1LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/stepfunction-processor-function1-${EnvironmentName}'
+      RetentionInDays: 7
+
+  ProcessorFunction1:
+    Type: AWS::Lambda::Function
+    DependsOn: Function1LogGroup
+    Properties:
+      FunctionName: !Sub "stepfunction-processor-function1-${EnvironmentName}"
+      Runtime: !Ref LambdaRuntime
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log('Function 1: Processing S3 event', JSON.stringify(event, null, 2));
+
+            const bucketName = event.bucketName || event.detail?.bucket?.name;
+            const objectKey = event.objectKey || event.detail?.object?.key;
+
+            console.log(`Function 1: Processing file: ${objectKey} from bucket: ${bucketName}`);
+
+            // Perform first processing step
+            const result = {
+              bucketName,
+              objectKey,
+              processedBy: 'function1',
+              timestamp: new Date().toISOString(),
+              status: 'processed-step1',
+              metadata: {
+                fileSize: event.detail?.object?.size || 'unknown',
+                etag: event.detail?.object?.etag || 'unknown'
+              }
+            };
+
+            console.log('Function 1: Processing complete', JSON.stringify(result, null, 2));
+
+            return result;
+          };
+      Timeout: 30
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref EnvironmentName
+
+  Function2LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/stepfunction-processor-function2-${EnvironmentName}'
+      RetentionInDays: 7
+
+  ProcessorFunction2:
+    Type: AWS::Lambda::Function
+    DependsOn: Function2LogGroup
+    Properties:
+      FunctionName: !Sub "stepfunction-processor-function2-${EnvironmentName}"
+      Runtime: !Ref LambdaRuntime
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log('Function 2: Processing event from Function 1', JSON.stringify(event, null, 2));
+
+            const { bucketName, objectKey, metadata } = event;
+
+            console.log(`Function 2: Final processing for file: ${objectKey} from bucket: ${bucketName}`);
+
+            // Perform second processing step
+            const result = {
+              bucketName,
+              objectKey,
+              processedBy: 'function2',
+              previousStep: event.processedBy,
+              timestamp: new Date().toISOString(),
+              status: 'completed',
+              metadata,
+              summary: {
+                totalSteps: 2,
+                allStepsCompleted: true,
+                finalStatus: 'success'
+              }
+            };
+
+            console.log('Function 2: Processing complete', JSON.stringify(result, null, 2));
+
+            return result;
+          };
+      Timeout: 30
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref EnvironmentName
+
+  StepFunctionsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "stepfunction-state-machine-role-${EnvironmentName}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ProcessorFunction1.Arn
+                  - !GetAtt ProcessorFunction2.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:CreateLogStream
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutLogEvents
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: "*"
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/stepfunctions/s3-processor-state-machine-${EnvironmentName}'
+      RetentionInDays: 7
+
+  S3ProcessorStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "s3-processor-state-machine-${EnvironmentName}"
+      RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StateMachineLogGroup.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Process S3 uploads through two Lambda functions",
+          "StartAt": "ProcessStep1",
+          "States": {
+            "ProcessStep1": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${ProcessorFunction1.Arn}",
+                "Payload": {
+                  "bucketName.$": "$.detail.bucket.name",
+                  "objectKey.$": "$.detail.object.key",
+                  "detail.$": "$.detail"
+                }
+              },
+              "ResultSelector": {
+                "result.$": "$.Payload"
+              },
+              "ResultPath": "$.step1Result",
+              "Next": "ProcessStep2"
+            },
+            "ProcessStep2": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${ProcessorFunction2.Arn}",
+                "Payload.$": "$.step1Result.result"
+              },
+              "ResultSelector": {
+                "result.$": "$.Payload"
+              },
+              "ResultPath": "$.step2Result",
+              "End": true
+            }
+          }
+        }
+
+  EventBridgeStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "eventbridge-stepfunctions-role-${EnvironmentName}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartStepFunctionsExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref S3ProcessorStateMachine
+
+  # EventPatternはここのFilterをしている。
+  # {
+  # "version": "0",
+  # "id": "649ab5cb-541f-afa2-04ce-73683532e3a6",
+  # "detail-type": "Object Created",
+  # "source": "aws.s3",
+  # "account": "454347382012",
+  # "time": "2025-10-21T00:48:22Z",
+  # "region": "us-east-1",
+  # "resources": [
+  #   "arn:aws:s3:::stepfunction-upload-bucket-dev-454347382012"
+  # ],
+  # 省略
+  # }
+  S3UploadEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "s3-upload-trigger-rule-${EnvironmentName}"
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - "Object Created"
+        detail:
+          bucket:
+            name:
+              - !Ref UploadBucket
+      State: ENABLED
+      Targets:
+        - Id: TriggerStateMachine
+          Arn: !Ref S3ProcessorStateMachine
+          RoleArn: !GetAtt EventBridgeStepFunctionsRole.Arn
+
+Outputs:
+  UploadBucketName:
+    Description: Name of the S3 bucket for uploads
+    Value: !Ref UploadBucket
+
+  StateMachineArn:
+    Description: ARN of the Step Functions state machine
+    Value: !Ref S3ProcessorStateMachine
+
+  Function1Arn:
+    Description: ARN of Lambda Function 1
+    Value: !GetAtt ProcessorFunction1.Arn
+
+  Function2Arn:
+    Description: ARN of Lambda Function 2
+    Value: !GetAtt ProcessorFunction2.Arn
