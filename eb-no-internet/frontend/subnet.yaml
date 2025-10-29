@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetAZ1CIDR:
+    Type: String
+  PublicSubnetAZ2CIDR:
+    Type: String
+  PrivateSubnetAZ1CIDR:
+    Type: String
+  PrivateSubnetAZ2CIDR:
+    Type: String
+
+Resources:
+  # パブリックサブネット (AZ1)
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    DeletionPolicy: Delete
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      CidrBlock: !Ref PublicSubnetAZ1CIDR
+      MapPublicIpOnLaunch: true
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "public-subnet-az1-${EnvironmentName}"
+
+  # パブリックサブネット (AZ2)
+  PublicSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    DeletionPolicy: Delete
+    Properties:
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      CidrBlock: !Ref PublicSubnetAZ2CIDR
+      MapPublicIpOnLaunch: true
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "public-subnet-az2-${EnvironmentName}"
+
+  # プライベートサブネット (AZ1)
+  PrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    DeletionPolicy: Delete
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      CidrBlock: !Ref PrivateSubnetAZ1CIDR
+      MapPublicIpOnLaunch: false
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "private-subnet-az1-${EnvironmentName}"
+
+  # プライベートサブネット (AZ2)
+  PrivateSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    DeletionPolicy: Delete
+    Properties:
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      CidrBlock: !Ref PrivateSubnetAZ2CIDR
+      MapPublicIpOnLaunch: false
+      PrivateDnsNameOptionsOnLaunch:
+        EnableResourceNameDnsAAAARecord: false
+        EnableResourceNameDnsARecord: true
+        HostnameType: resource-name
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: "Name"
+          Value: !Sub "private-subnet-az2-${EnvironmentName}"
+
+Outputs:
+  # パブリックサブネット (AZ1) の出力
+  PublicSubnetAZ1Id:
+    Value: !Ref PublicSubnetAZ1
+
+  # パブリックサブネット (AZ2) の出力
+  PublicSubnetAZ2Id:
+    Value: !Ref PublicSubnetAZ2
+
+  # プライベートサブネット (AZ1) の出力
+  PrivateSubnetAZ1Id:
+    Value: !Ref PrivateSubnetAZ1
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivateSubnetAZ1Id"
+
+
+  # プライベートサブネット (AZ2) の出力
+  PrivateSubnetAZ2Id:
+    Value: !Ref PrivateSubnetAZ2
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivateSubnetAZ2Id"

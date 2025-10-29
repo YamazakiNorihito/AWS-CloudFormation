@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnetAZ1CIDR:
+    Type: String
+    Default: 10.0.1.0/24
+  PublicSubnetAZ2CIDR:
+    Type: String
+    Default: 10.0.2.0/24
+  PrivateSubnetAZ1CIDR:
+    Type: String
+    Default: 10.0.3.0/24
+  PrivateSubnetAZ2CIDR:
+    Type: String
+    Default: 10.0.4.0/24
+
+  TemplateBucket:
+    Type: String
+
+Resources:
+  VPCStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/frontend/vpc.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcCIDR: !Ref VpcCIDR
+
+  SubnetStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/frontend/subnet.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        PublicSubnetAZ1CIDR: !Ref PublicSubnetAZ1CIDR
+        PublicSubnetAZ2CIDR: !Ref PublicSubnetAZ2CIDR
+        PrivateSubnetAZ1CIDR: !Ref PrivateSubnetAZ1CIDR
+        PrivateSubnetAZ2CIDR: !Ref PrivateSubnetAZ2CIDR
+
+  InternetGatewayStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/frontend/internet-gateway.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+
+  RouteStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/frontend/route.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        InternetGatewayId: !GetAtt InternetGatewayStack.Outputs.InternetGatewayId
+        PublicSubnet1Id: !GetAtt SubnetStack.Outputs.PublicSubnetAZ1Id
+        PublicSubnet2Id: !GetAtt SubnetStack.Outputs.PublicSubnetAZ2Id
+        PrivateSubnet1Id: !GetAtt SubnetStack.Outputs.PrivateSubnetAZ1Id
+        PrivateSubnet2Id: !GetAtt SubnetStack.Outputs.PrivateSubnetAZ2Id
+
+  ALBStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: RouteStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/frontend/load-balancer.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        SubnetIds: !Join [",", [!GetAtt SubnetStack.Outputs.PublicSubnetAZ1Id, !GetAtt SubnetStack.Outputs.PublicSubnetAZ2Id]]
+        LoadBalancerSecurityGroup: !GetAtt VPCStack.Outputs.DefaultSecurityGroup
+
+  InstanceConnectEndpointStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: RouteStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/frontend/eic-endpoint.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        SubnetId: !GetAtt SubnetStack.Outputs.PrivateSubnetAZ1Id

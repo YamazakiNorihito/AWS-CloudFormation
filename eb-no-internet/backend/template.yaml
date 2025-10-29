@@ -1,0 +1,613 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    
+  DomainName:
+    Type: String
+
+  VpcId:
+    Type: String
+  PrivateSubnetAz1Id:
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnetAz2Id:
+    Type: AWS::EC2::Subnet::Id
+
+  SharedLoadBalancerArn:
+    Type: String
+  ALBSecurityGroupId:
+    Type: String
+
+  PrivateRouteTable1Id:
+    Type: String
+  PrivateRouteTable2Id:
+    Type: String
+
+  SolutionStackName:
+    Type: String
+    Default: "64bit Amazon Linux 2023 v4.7.1 running Docker"
+  InstanceType:
+    Type: String
+    Default: "t3.nano"
+
+  TemplateBucket:
+    Type: String
+
+
+Resources:
+  # --------------------------
+  # IAM
+  # --------------------------
+  # https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/concepts-roles-service.html
+  EBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-eb-nginx-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: "Allow"
+            Principal: 
+              Service: "elasticbeanstalk.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Path: '/'
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth"
+        - "arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService"
+    DeletionPolicy: Delete
+
+  # https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/concepts-roles-instance.html
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-ec2-nginx-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "ec2.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Path: '/'
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker"
+        - "arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier"
+        - "arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier"
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: "S3TemplateBucketReadOnly"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:ListBucket"
+                  - "s3:GetBucketLocation"
+                Resource:
+                  - !Sub "arn:aws:s3:::${TemplateBucket}"
+                  - !Sub "arn:aws:s3:::${TemplateBucket}/*"
+        - PolicyName: "ECRImagePull"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "ecr:GetAuthorizationToken"
+                  - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:GetDownloadUrlForLayer"
+                  - "ecr:BatchGetImage"
+                Resource: "*"
+        - PolicyName: "CloudWatchLogsAccess"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                  - "logs:DescribeLogStreams"
+                  - "logs:DescribeLogGroups"
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${EnvironmentName}/*"
+    DeletionPolicy: Delete
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "${EnvironmentName}-eb-nginx-instance-profile"
+      Roles:
+        - !Ref EC2Role
+    DeletionPolicy: Delete
+  
+  # --------------------------
+  # Log Group
+  # --------------------------
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "${EnvironmentName}/nginx"
+      RetentionInDays: 14
+    DeletionPolicy: Delete
+
+  # --------------------------
+  # ECR PullThroughCacheRule
+  # --------------------------
+  ECRPublicPullThroughCacheRule:
+    Type: 'AWS::ECR::PullThroughCacheRule'
+    Properties:
+      EcrRepositoryPrefix: ecr-public
+      UpstreamRegistry: ecr-public
+      UpstreamRegistryUrl: public.ecr.aws
+    DeletionPolicy: Delete
+
+  # --------------------------
+  # SecurityGroup
+  # --------------------------
+  SecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    DeletionPolicy: Delete
+    Properties:
+      GroupName: !Sub "security-group-nginx-${EnvironmentName}"
+      GroupDescription: "Security group for nginx instances"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  SecurityGroupIngressFromALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    DeletionPolicy: Delete
+    Properties:
+      GroupId: !GetAtt SecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref ALBSecurityGroupId
+
+  SecurityGroupIngressForInterfaceEndpoints443:
+    Type: AWS::EC2::SecurityGroupIngress
+    DeletionPolicy: Delete
+    Properties:
+      GroupId: !GetAtt SecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 10.0.0.0/16
+
+  # --------------------------
+  # VPCEndpoint
+  # --------------------------
+  S3GatewayEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      VpcId: !Ref VpcId
+      RouteTableIds:
+        - !Ref PrivateRouteTable1Id
+        - !Ref PrivateRouteTable2Id
+
+  ECRApiEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  ECRDkrEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  CloudWatchLogsEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  ElasticbeanstalkEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.elasticbeanstalk"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  ElasticbeanstalkHealthEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.elasticbeanstalk-health"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  AutoscalingEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.autoscaling"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  EC2Endpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ec2"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  CloudformationEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.cloudformation"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  SqsEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.sqs"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  MonitoringEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.monitoring"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  SSMEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssm"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  SSMMessagesEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssmmessages"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  EC2MessagesEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ec2messages"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  ElasticLoadBalancingEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.elasticloadbalancing"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  STSEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    DeletionPolicy: Delete
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.sts"
+      SubnetIds:
+        - !Ref PrivateSubnetAz1Id
+        - !Ref PrivateSubnetAz2Id
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  # --------------------------
+  # Elastic Beanstalk
+  # --------------------------
+  Application:
+    Type: "AWS::ElasticBeanstalk::Application"
+    DeletionPolicy: Delete
+    Properties:
+      ApplicationName: !Sub "nginx-${EnvironmentName}"
+      ResourceLifecycleConfig:
+        ServiceRole: !GetAtt EBRole.Arn
+        VersionLifecycleConfig:
+          MaxCountRule:
+            Enabled: true
+            MaxCount: 10
+            DeleteSourceFromS3: false
+
+  ApplicationVersion:
+    Type: "AWS::ElasticBeanstalk::ApplicationVersion"
+    DeletionPolicy: Delete
+    Properties:
+      ApplicationName: !Ref Application
+      SourceBundle:
+        S3Bucket: !Ref TemplateBucket
+        S3Key: "app-nginx.zip"
+
+  Environment:
+    Type: "AWS::ElasticBeanstalk::Environment"
+    DeletionPolicy: Delete
+    Properties:
+      EnvironmentName: !Sub "env-nginx-${EnvironmentName}"
+      ApplicationName: !Ref Application
+      VersionLabel: !Ref ApplicationVersion
+      SolutionStackName: !Ref SolutionStackName
+      OptionSettings:
+        - Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: "EnvironmentType"
+          Value: "LoadBalanced"
+        - Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: "ServiceRole"
+          Value: !GetAtt EBRole.Arn
+        - Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: "LoadBalancerType"
+          Value: "application"
+
+        - Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: "LoadBalancerIsShared"
+          Value: "true"
+
+        - Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: "InstanceType"
+          Value: !Ref InstanceType
+        - Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: "IamInstanceProfile"
+          Value: !Ref InstanceProfile
+        - Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: "EC2KeyName"
+          Value: !Sub "key-pair-nginx-${EnvironmentName}"
+
+        - Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: "SecurityGroups"
+          Value: !Ref SecurityGroup
+        - Namespace: "aws:ec2:vpc"
+          OptionName: "VPCId"
+          Value: !Ref VpcId
+        - Namespace: "aws:ec2:vpc"
+          OptionName: "Subnets"
+          Value: !Join [",", [!Ref PrivateSubnetAz1Id, !Ref PrivateSubnetAz2Id]]
+
+        - Namespace: "aws:ec2:vpc"
+          OptionName: "AssociatePublicIpAddress"
+          Value: "false"
+        - Namespace: "aws:elbv2:loadbalancer"
+          OptionName: "SharedLoadBalancer"
+          Value: !Ref SharedLoadBalancerArn
+        - Namespace: "aws:autoscaling:asg"
+          OptionName: "MinSize"
+          Value: "1"
+        - Namespace: "aws:autoscaling:asg"
+          OptionName: "MaxSize"
+          Value: "1"
+        - Namespace: "aws:autoscaling:asg"
+          OptionName: "Cooldown"
+          Value: "300" # unit: seconds
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "MeasureName"
+          Value: "CPUUtilization"
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "Statistic"
+          Value: "Average"
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "Unit"
+          Value: "Percent"
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "Period"
+          Value: "3" # unit: minutes
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "EvaluationPeriods"
+          Value: "3"
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "UpperThreshold"
+          Value: "80" # 80%
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "UpperBreachScaleIncrement"
+          Value: "1"
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "LowerThreshold"
+          Value: "20" # 20%
+        - Namespace: "aws:autoscaling:trigger"
+          OptionName: "LowerBreachScaleIncrement"
+          Value: "-1"
+
+        - Namespace: "aws:elasticbeanstalk:command"
+          OptionName: "DeploymentPolicy"
+          Value: "Rolling"
+        - Namespace: "aws:elasticbeanstalk:command"
+          OptionName: "Timeout"
+          Value: "600" # Unit: seconds
+        - Namespace: "aws:elasticbeanstalk:command"
+          OptionName: "BatchSizeType"
+          Value: "Fixed"
+        - Namespace: "aws:elasticbeanstalk:command"
+          OptionName: "BatchSize"
+          Value: "1"
+        - Namespace: "aws:elasticbeanstalk:command"
+          OptionName: "IgnoreHealthCheck"
+          Value: "false"
+
+        - Namespace: "aws:autoscaling:updatepolicy:rollingupdate"
+          OptionName: "RollingUpdateEnabled"
+          Value: "true"
+        - Namespace: "aws:autoScaling:updatepolicy:rollingupdate"
+          OptionName: "MaxBatchSize"
+          Value: "1"
+        - Namespace: "aws:autoScaling:updatepolicy:rollingupdate"
+          OptionName: "MinInstancesInService"
+          Value: "1"
+        - Namespace: "aws:autoScaling:updatepolicy:rollingupdate"
+          OptionName: "RollingUpdateType"
+          Value: "Health"
+        - Namespace: "aws:autoScaling:updatepolicy:rollingupdate"
+          OptionName: "pauseTime"
+          Value: "PT7M"
+
+        - Namespace: "aws:elasticbeanstalk:environment:process:default"
+          OptionName: "Port"
+          Value: "80"
+        - Namespace: "aws:elasticbeanstalk:environment:process:default"
+          OptionName: "Protocol"
+          Value: "HTTP"
+        - Namespace: "aws:elasticbeanstalk:environment:process:default"
+          OptionName: "HealthCheckPath"
+          Value: "/"
+        - Namespace: "aws:elasticbeanstalk:environment:process:default"
+          OptionName: "HealthCheckInterval"
+          Value: "30" # ヘルスチェックの実行間隔（秒）
+        - Namespace: "aws:elasticbeanstalk:environment:process:default"
+          OptionName: "HealthCheckTimeout"
+          Value: "5" # ヘルスチェックのタイムアウト（秒）
+        - Namespace: "aws:elasticbeanstalk:environment:process:default"
+          OptionName: "HealthyThresholdCount"
+          Value: "5" # 正常とみなすまでの連続成功回数
+        - Namespace: "aws:elasticbeanstalk:environment:process:default"
+          OptionName: "UnhealthyThresholdCount"
+          Value: "2" # 異常とみなすまでの連続失敗回数
+
+        - Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: "StreamLogs"
+          Value: "true"
+        - Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: "DeleteOnTerminate"
+          Value: "true"
+        - Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: "RetentionInDays"
+          Value: "5"
+        - Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: "HealthStreamingEnabled"
+          Value: "true"
+        - Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: "DeleteOnTerminate"
+          Value: "true"
+        - Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: "RetentionInDays"
+          Value: "5"
+
+        #- Namespace: "aws:elbv2:listener:443"
+        - Namespace: "aws:elbv2:listener:80"
+          OptionName: "Rules"
+          Value: "default,pingnginxrule" 
+
+        - Namespace: "aws:elbv2:listenerrule:pingnginxrule"
+          OptionName: "PathPatterns"
+          Value: "/*"
+        - Namespace: "aws:elbv2:listenerrule:pingnginxrule"
+          OptionName: "Priority"
+          Value: "35"
+        - Namespace: "aws:elbv2:listenerrule:pingnginxrule"
+          OptionName: "Process"
+          Value: "default"
+        - Namespace: "aws:elbv2:listenerrule:pingnginxrule"
+          OptionName: "HostHeaders"
+          Value: !Ref DomainName
+        - Namespace: "aws:elasticbeanstalk:application:environment"
+          OptionName: "EnvironmentName"
+          Value: !Ref EnvironmentName
+        - Namespace: "aws:elasticbeanstalk:application:environment"
+          OptionName: "AWS_REGION"
+          Value:  !Sub "${AWS::Region}"
+        - Namespace: "aws:elasticbeanstalk:application:environment"
+          OptionName: "AWS_ACCOUNT_ID"
+          Value: !Sub "${AWS::AccountId}"

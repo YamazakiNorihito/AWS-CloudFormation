@@ -1,0 +1,30 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+
+Resources:
+  EicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    Properties:
+      GroupName: !Sub "securitygroup-eic-endpoint-${EnvironmentName}"
+      GroupDescription: !Sub "SG for EC2 Instance Connect Endpoint (${EnvironmentName})"
+      VpcId: !Ref VpcId
+
+  EicEndpoint:
+    Type: AWS::EC2::InstanceConnectEndpoint
+    DeletionPolicy: Delete
+    Properties:
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds: [ !Ref EicSecurityGroup ]
+Outputs:
+  EicEndpointId:
+    Value: !Ref EicEndpoint
+    Export:
+      Name: !Sub "${EnvironmentName}-EicEndpointId"

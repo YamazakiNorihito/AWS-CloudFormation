@@ -1,5 +1,13 @@
-# Created by https://www.toptal.com/developers/gitignore/api/go,macos,windows,visualstudiocode,node,git,dotenv,csharp,dotnetcore
-# Edit at https://www.toptal.com/developers/gitignore?templates=go,macos,windows,visualstudiocode,node,git,dotenv,csharp,dotnetcore
+# Created by https://www.toptal.com/developers/gitignore/api/go,git,node,macos,csharp,dotenv,windows,dotnetcore,visualstudiocode,certificates
+# Edit at https://www.toptal.com/developers/gitignore?templates=go,git,node,macos,csharp,dotenv,windows,dotnetcore,visualstudiocode,certificates
+
+### certificates ###
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.priv
 
 ### Csharp ###
 ## Ignore Visual Studio temporary files, build results, and
@@ -653,7 +661,8 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
-# End of https://www.toptal.com/developers/gitignore/api/go,macos,windows,visualstudiocode,node,git,dotenv,csharp,dotnetcore
+# End of https://www.toptal.com/developers/gitignore/api/go,git,node,macos,csharp,dotenv,windows,dotnetcore,visualstudiocode,certificates
+
 
 **/easy-rsa-vpn/*
 !**/easy-rsa-vpn/.gitkeep
