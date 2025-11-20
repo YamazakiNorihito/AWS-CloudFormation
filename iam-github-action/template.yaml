@@ -1,0 +1,34 @@
+# 最小限のIAMロールを作成するCloudFormationテンプレート
+# https://github.com/aws-actions/configure-aws-credentials?tab=readme-ov-file#oidc-configuration
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  EnvName:
+    Type: String
+  GitHubOrg:
+    Type: String
+  GitHubRepo:
+    Type: String
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvName}-github-action-deploy-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Federated: !GetAtt GitHubOIDCProvider.Arn
+            Action: 'sts:AssumeRoleWithWebIdentity'
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+              StringLike:
+                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOrg}/${GitHubRepo}:*"

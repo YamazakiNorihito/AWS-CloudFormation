@@ -1,0 +1,44 @@
+name: Test AWS Token Acquisition
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/*
+
+jobs:
+  test-aws-credentials:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ vars.ENV_NAME }}-github-action-deploy-role
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify AWS Credentials
+        run: |
+          echo "=========================================="
+          echo "AWS Credentials Successfully Obtained!"
+          echo "=========================================="
+          echo ""
+          echo "AWS Account ID:"
+          aws sts get-caller-identity --query Account --output text
+          echo ""
+          echo "Assumed Role ARN:"
+          aws sts get-caller-identity --query Arn --output text
+          echo ""
+          echo "AWS Region:"
+          echo "${{ vars.AWS_REGION }}"
+          echo ""
+          echo "=========================================="
+          echo "Token acquisition test completed successfully!"
+          echo "=========================================="
