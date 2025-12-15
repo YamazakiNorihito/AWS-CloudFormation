@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Cognito UserPool for ALB authentication"
+
+Parameters:
+  CognitoDomainPrefix:
+    Type: String
+    Default: "poc-mtls-auth"
+  ALBDnsName:
+    Type: String
+  ALBArn:
+    Type: String
+  CertificateArn:
+    Type: String
+  TrustStoreBucketName:
+    Type: String
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: poc-mtls-jwt-userpool
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref UserPool
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: poc-alb-client
+      GenerateSecret: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - !Sub "https://${ALBDnsName}/oauth2/idpresponse"
+
+  TrustStore:
+    Type: AWS::ElasticLoadBalancingV2::TrustStore
+    Properties:
+      Name: mtls-trust-store
+      CaCertificatesBundleS3Bucket: !Ref TrustStoreBucketName
+      CaCertificatesBundleS3Key: ca-bundle.pem
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALBArn
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      MutualAuthentication:
+        Mode: verify
+        TrustStoreArn: !Ref TrustStore
+      DefaultActions:
+        - Type: authenticate-cognito
+          Order: 1
+          AuthenticateCognitoConfig:
+            UserPoolArn: !GetAtt UserPool.Arn
+            UserPoolClientId: !Ref UserPoolClient
+            UserPoolDomain: !Ref CognitoDomainPrefix
+        - Type: fixed-response
+          Order: 2
+          FixedResponseConfig:
+            StatusCode: "200"
+            ContentType: "text/html"
+            MessageBody: !Sub |
+              <html>
+              <body>
+              <h1>mTLS + Cognito Authentication Success!</h1>
+              <p>You have passed both device and user authentication.</p>
+              </body>
+              </html>
+
+  ProfileRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPSListener
+      Priority: 12
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /profile
+      Actions:
+        - Type: authenticate-cognito
+          Order: 1
+          AuthenticateCognitoConfig:
+            UserPoolArn: !GetAtt UserPool.Arn
+            UserPoolClientId: !Ref UserPoolClient
+            UserPoolDomain: !Ref CognitoDomainPrefix
+        - Type: fixed-response
+          Order: 2
+          FixedResponseConfig:
+            StatusCode: "200"
+            ContentType: "text/html"
+            MessageBody: !Sub |
+              <html>
+              <body>
+              <h1>User Profile</h1>
+              <p>Welcome to your profile page.</p>
+              <a href="https://${ALBDnsName}/">Home</a>
+              </body>
+              </html>
+Outputs:
+  UserPoolId:
+    Value: !Ref UserPool
+    Export:
+      Name: CognitoUserPoolId
+  UserPoolArn:
+    Value: !GetAtt UserPool.Arn
+    Export:
+      Name: CognitoUserPoolArn
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+    Export:
+      Name: CognitoUserPoolClientId
+  UserPoolDomain:
+    Value: !Ref CognitoDomainPrefix
+    Export:
+      Name: CognitoUserPoolDomain
+  HostedUiUrl:
+    Value: !Sub "https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
