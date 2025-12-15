@@ -7,6 +7,25 @@ PROFILE=""
 BUCKET=""
 REGION="us-east-1"
 
+EnvironmentName=""
+
+POLICY_JSON=$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudformation.amazonaws.com"
+      },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::${BUCKET}/*"
+    }
+  ]
+}
+EOF
+)
+
 # -----------------------------
 # Create Deploy S3
 # -----------------------------
@@ -18,7 +37,7 @@ if ! aws s3 ls "s3://${BUCKET}" --region "${REGION}" --profile "${PROFILE}" ; th
 
   max_retries=5
   count=0
-  until aws s3api put-bucket-policy --bucket "${BUCKET}" --policy file://bucket-policy.json  --region "${REGION}" --profile "${PROFILE}"
+  until aws s3api put-bucket-policy --bucket "${BUCKET}" --policy "${POLICY_JSON}" --region "${REGION}" --profile "${PROFILE}"
   do
     count=$((count+1))
     if [ "${count}" -eq "${max_retries}" ]; then
@@ -42,7 +61,9 @@ aws cloudformation deploy \
   --s3-bucket "${BUCKET}" \
   --template-file "./template.yaml" \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
-  --parameter-overrides "file://parameters.json" \
+  --parameter-overrides \
+    EnvironmentName="${EnvironmentName}" \
+    TemplateBucket="${BUCKET}" \
   --region "${REGION}" \
   --profile "${PROFILE}"
 
