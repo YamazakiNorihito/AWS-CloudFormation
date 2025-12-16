@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '^[a-z][a-z0-9]*$'
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    Properties:
+      GroupDescription: !Sub "${EnvironmentName} ElastiCache"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  SubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    DeletionPolicy: Delete
+    Properties:
+      Description: !Sub "${EnvironmentName} ElastiCache"
+      SubnetIds: !Ref PrivateSubnetIds
+      CacheSubnetGroupName: !Sub "elasticache-subnet-${EnvironmentName}"
+
+  ReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    DeletionPolicy: Delete
+    Properties:
+      ReplicationGroupId: !Sub "elasticache-${EnvironmentName}"
+      ReplicationGroupDescription: !Sub "ElastiCache Valkey for ${EnvironmentName}"
+      Engine: valkey
+      EngineVersion: "7.2"
+      CacheNodeType: cache.t4g.micro
+      CacheSubnetGroupName: !Ref SubnetGroup
+      SecurityGroupIds:
+        - !GetAtt SecurityGroup.GroupId
+      AutoMinorVersionUpgrade: true
+      PreferredMaintenanceWindow: sun:07:00-sun:09:00
+      MultiAZEnabled: false
+      AutomaticFailoverEnabled: false
+      NumNodeGroups: 1
+      ReplicasPerNodeGroup: 0
+      Port: 6379
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: false
+      CacheParameterGroupName: "default.valkey7"
+      Tags:
+        - Key: "Environment"
+          Value: !Ref EnvironmentName
+
+Outputs:
+  PrimaryEndpoint:
+    Value: !GetAtt ReplicationGroup.PrimaryEndPoint.Address
+  SecurityGroupId:
+    Value: !Ref SecurityGroup
