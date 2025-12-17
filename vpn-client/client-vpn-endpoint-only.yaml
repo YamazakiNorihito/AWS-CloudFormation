@@ -26,6 +26,7 @@ Resources:
             ClientRootCertificateChainArn: !Ref VpnClientRootCertificateArn
       ConnectionLogOptions:
         Enabled: false
+      SplitTunnel: true
       TagSpecifications:
         - ResourceType: client-vpn-endpoint
           Tags:

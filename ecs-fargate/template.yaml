@@ -1,0 +1,349 @@
+# aws cloudformation deploy --template-file template.yaml --stack-name ecs-fargate-keycloak --parameter-overrides file://parameters.json --capabilities CAPABILITY_NAMED_IAM
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Keycloak on ECS Fargate with RDS MySQL
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  ALBListenerArn:
+    Type: String
+    Description: Existing ALB Listener ARN
+
+  ALBSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+
+  KeycloakHostname:
+    Type: String
+
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+
+  KeycloakAdminPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+
+Resources:
+  # ============================================
+  # Security Groups
+  # ============================================
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Keycloak ECS tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref ALBSecurityGroupId
+        - IpProtocol: tcp
+          FromPort: 9000
+          ToPort: 9000
+          SourceSecurityGroupId: !Ref ALBSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-keycloak-ecs-sg"
+
+  # JGroups cluster communication (self-referencing rule)
+  ECSSecurityGroupJGroupsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 7800
+      ToPort: 7800
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Keycloak RDS
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-keycloak-rds-sg"
+
+  # ============================================
+  # RDS MySQL
+  # ============================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for Keycloak RDS
+      SubnetIds: !Ref PrivateSubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-keycloak-db-subnet-group"
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub "${EnvironmentName}-keycloak-db"
+      DBName: keycloak
+      Engine: mysql
+      EngineVersion: "8.0.39"
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: "20"
+      StorageType: gp2
+      StorageEncrypted: true
+      AutoMinorVersionUpgrade: true
+      MasterUsername: keycloak
+      MasterUserPassword: !Ref DBMasterPassword
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 0
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-keycloak-db"
+
+  # ============================================
+  # Secrets Manager
+  # ============================================
+  KeycloakAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: !Sub "${EnvironmentName}/keycloak/admin"
+      Description: Keycloak admin credentials
+      SecretString: !Sub |
+        {
+          "username": "admin",
+          "password": "${KeycloakAdminPassword}"
+        }
+
+  # ============================================
+  # ECS Cluster
+  # ============================================
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${EnvironmentName}-keycloak-cluster"
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+
+  # ============================================
+  # CloudWatch Log Group
+  # ============================================
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/ecs/${EnvironmentName}/keycloak"
+      RetentionInDays: 7
+
+  # ============================================
+  # IAM Roles
+  # ============================================
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-keycloak-task-execution-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref KeycloakAdminSecret
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-keycloak-task-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  # ============================================
+  # ECS Task Definition
+  # ============================================
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${EnvironmentName}-keycloak"
+      Cpu: "1024"
+      Memory: "2048"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: keycloak
+          Image: quay.io/keycloak/keycloak:26.4.7
+          Essential: true
+          Command:
+            - start
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: KEYCLOAK_ADMIN
+              Value: admin
+            - Name: KEYCLOAK_ADMIN_PASSWORD
+              Value: !Ref KeycloakAdminPassword
+            - Name: KC_DB
+              Value: mysql
+            - Name: KC_DB_URL
+              Value: !Sub "jdbc:mysql://${RDSInstance.Endpoint.Address}:3306/keycloak"
+            - Name: KC_DB_USERNAME
+              Value: keycloak
+            - Name: KC_DB_PASSWORD
+              Value: !Ref DBMasterPassword
+            - Name: KC_HTTP_ENABLED
+              Value: "true"
+            - Name: KC_HTTP_RELATIVE_PATH
+              Value: /keycloak
+            - Name: KC_PROXY_HEADERS
+              Value: xforwarded
+            - Name: KC_HEALTH_ENABLED
+              Value: "true"
+            - Name: KC_METRICS_ENABLED
+              Value: "true"
+            - Name: KC_CACHE
+              Value: ispn
+            - Name: KC_CACHE_STACK
+              Value: jdbc-ping
+            - Name: KC_HOSTNAME_STRICT
+              Value: "false"
+            - Name: KC_HOSTNAME
+              Value: !Ref KeycloakHostname
+            - Name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
+              Value: /keycloak
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: keycloak
+
+  # ============================================
+  # ALB Target Group
+  # ============================================
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${EnvironmentName}-keycloak-tg"
+      VpcId: !Ref VpcId
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /keycloak/health/ready
+      HealthCheckPort: "9000"
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: "200"
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-keycloak-tg"
+
+  # ============================================
+  # ALB Listener Rule
+  # ============================================
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListenerArn
+      Priority: 100
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /keycloak/*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # ============================================
+  # ECS Service
+  # ============================================
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ListenerRule
+      - RDSInstance
+    Properties:
+      ServiceName: !Sub "${EnvironmentName}-keycloak-service"
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 2
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets: !Ref PrivateSubnetIds
+      LoadBalancers:
+        - ContainerName: keycloak
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
+      HealthCheckGracePeriodSeconds: 180
+
+Outputs:
+  ClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+
+  ServiceName:
+    Description: ECS Service Name
+    Value: !GetAtt ECSService.Name
+
+  RDSEndpoint:
+    Description: RDS Endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  KeycloakURL:
+    Description: Keycloak URL
+    Value: !Sub "https://${KeycloakHostname}/keycloak"
+
+  TargetGroupArn:
+    Description: Target Group ARN
+    Value: !Ref TargetGroup
