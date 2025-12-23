@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: '2010-09-09'
+# aws ec2 describe-network-interfaces --filters "Name=description,Values=ELB app/alb-internal-*" --query 'NetworkInterfaces[*].PrivateIpAddress' --output text
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  HTTPListenerArn:
+    Type: String
+  HTTPSListenerArn:
+    Type: String
+    Default: ""
+  InternalALBIp1:
+    Type: String
+  InternalALBIp2:
+    Type: String
+
+Conditions:
+  HasHTTPSListener: !Not [!Equals [!Ref HTTPSListenerArn, ""]]
+
+Resources:
+  InternalALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "tg-internal-alb-${EnvironmentName}"
+      VpcId: !Ref VpcId
+      TargetType: ip
+      Protocol: HTTP
+      Port: 80
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: "80"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: "200"
+      Targets:
+        - Id: !Ref InternalALBIp1
+          Port: 80
+        - Id: !Ref InternalALBIp2
+          Port: 80
+      Tags:
+        - Key: Name
+          Value: !Sub "tg-internal-alb-${EnvironmentName}"
+
+  HTTPListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPListenerArn
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/health"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref InternalALBTargetGroup
+
+  HTTPSListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: HasHTTPSListener
+    Properties:
+      ListenerArn: !Ref HTTPSListenerArn
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/health"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref InternalALBTargetGroup
+
+  ExHTTPListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPListenerArn
+      Priority: 11
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /keycloak/*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref InternalALBTargetGroup
+
+  ExHTTPSListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: HasHTTPSListener
+    Properties:
+      ListenerArn: !Ref HTTPSListenerArn
+      Priority: 11
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /keycloak/*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref InternalALBTargetGroup
+
+Outputs:
+  TargetGroupARN:
+    Value: !Ref InternalALBTargetGroup

@@ -1,27 +1,27 @@
 [
   {
     "ParameterKey": "EnvironmentName",
-    "ParameterValue": "nori-test"
+    "ParameterValue": ""
   },
   {
     "ParameterKey": "VpcId",
-    "ParameterValue": "vpc-0d1002d2f92edbc6d"
+    "ParameterValue": ""
   },
   {
     "ParameterKey": "PrivateSubnetIds",
-    "ParameterValue": "subnet-003e8c1005db88617,subnet-088a86394a075c947"
+    "ParameterValue": ""
   },
   {
     "ParameterKey": "ALBListenerArn",
-    "ParameterValue": "arn:aws:elasticloadbalancing:us-east-1:454347382012:listener/app/alb-playground/faf72af2527bb78f/70240e99733e8e44"
+    "ParameterValue": ""
   },
   {
     "ParameterKey": "ALBSecurityGroupId",
-    "ParameterValue": "sg-01d4042b3c1309eab"
+    "ParameterValue": ""
   },
   {
     "ParameterKey": "KeycloakHostname",
-    "ParameterValue": "playground.sandbox.medcom-apps.com"
+    "ParameterValue": ""
   },
   {
     "ParameterKey": "DBMasterPassword",

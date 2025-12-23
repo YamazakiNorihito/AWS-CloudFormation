@@ -1,0 +1,220 @@
+# internalのkeycloakに対してToken Verificationを行うLambda
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Keycloak Token Verification Lambda
+
+Parameters:
+  KeycloakRealm:
+    Type: String
+    Default: myrealm
+    Description: Keycloak realm name
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for Lambda (private subnets recommended)
+    Default: subnet-09d542912b7062a46,subnet-0a9296f7bdf16a38e
+
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: Security Group IDs for Lambda
+    Default: sg-00c7d241276c203da
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: keycloak-token-verification-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  TokenVerificationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: keycloak-token-verification
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          KEYCLOAK_REALM: !Ref KeycloakRealm
+      VpcConfig:
+        SubnetIds: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+      Code:
+        ZipFile: |
+          const https = require('https');
+          const http = require('http');
+
+          /**
+           * Keycloak Token Verification Lambda
+           *
+           * Input:
+           *   - accessToken: The access token to verify
+           *   - fqdn: The Keycloak server FQDN (e.g., "keycloak.example.com" or "localhost:8081")
+           *   - realm: (optional) Keycloak realm name, defaults to env KEYCLOAK_REALM
+           *   - useHttps: (optional) Use HTTPS, defaults to true
+           *   - skipTlsVerify: (optional) Skip TLS certificate verification, defaults to false
+           */
+          exports.handler = async (event) => {
+            console.log('Received event:', JSON.stringify(event, null, 2));
+
+            const { accessToken, fqdn, realm, useHttps = true, skipTlsVerify = false } = event;
+
+            // Validation
+            if (!accessToken) {
+              return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'accessToken is required' }),
+                verified: false
+              };
+            }
+
+            if (!fqdn) {
+              return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'fqdn is required' }),
+                verified: false
+              };
+            }
+
+            const keycloakRealm = realm || process.env.KEYCLOAK_REALM || 'master';
+
+            try {
+              const userInfo = await verifyTokenViaUserinfo(
+                accessToken,
+                fqdn,
+                keycloakRealm,
+                useHttps,
+                skipTlsVerify
+              );
+
+              return {
+                statusCode: 200,
+                verified: true,
+                userInfo,
+                body: JSON.stringify({
+                  verified: true,
+                  userInfo
+                })
+              };
+            } catch (error) {
+              console.error('Token verification failed:', error.message);
+
+              return {
+                statusCode: error.statusCode || 401,
+                verified: false,
+                error: error.message,
+                body: JSON.stringify({
+                  verified: false,
+                  error: error.message
+                })
+              };
+            }
+          };
+
+          /**
+           * Verify token using Keycloak userinfo endpoint
+           */
+          async function verifyTokenViaUserinfo(accessToken, fqdn, realm, useHttps, skipTlsVerify) {
+            const protocol = useHttps ? 'https' : 'http';
+            const url = `${protocol}://${fqdn}/keycloak/realms/${realm}/protocol/openid-connect/userinfo`;
+
+            console.log(`Verifying token via userinfo endpoint: ${url}`);
+
+            return new Promise((resolve, reject) => {
+              const urlObj = new URL(url);
+              const client = useHttps ? https : http;
+
+              const options = {
+                hostname: urlObj.hostname,
+                port: urlObj.port || (useHttps ? 443 : 80),
+                path: urlObj.pathname,
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'Accept': 'application/json'
+                },
+                rejectUnauthorized: !skipTlsVerify
+              };
+
+              const req = client.request(options, (res) => {
+                let data = '';
+
+                res.on('data', (chunk) => {
+                  data += chunk;
+                });
+
+                res.on('end', () => {
+                  if (res.statusCode === 200) {
+                    try {
+                      const userInfo = JSON.parse(data);
+                      resolve(userInfo);
+                    } catch (e) {
+                      reject(new Error('Failed to parse userinfo response'));
+                    }
+                  } else if (res.statusCode === 401) {
+                    const error = new Error('Token is invalid or expired');
+                    error.statusCode = 401;
+                    reject(error);
+                  } else {
+                    const error = new Error(`Keycloak returned status ${res.statusCode}: ${data}`);
+                    error.statusCode = res.statusCode;
+                    reject(error);
+                  }
+                });
+              });
+
+              req.on('error', (error) => {
+                console.error('Request error:', error);
+                reject(new Error(`Failed to connect to Keycloak: ${error.message}`));
+              });
+
+              req.setTimeout(10000, () => {
+                req.destroy();
+                reject(new Error('Request timeout'));
+              });
+
+              req.end();
+            });
+          }
+
+  TokenVerificationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${TokenVerificationFunction}
+      RetentionInDays: 14
+
+  TokenVerificationFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt TokenVerificationFunction.Arn
+
+  TokenVerificationFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TokenVerificationFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+Outputs:
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt TokenVerificationFunction.Arn
+
+  FunctionUrl:
+    Description: Lambda Function URL
+    Value: !GetAtt TokenVerificationFunctionUrl.FunctionUrl
+
+  FunctionName:
+    Description: Lambda Function Name
+    Value: !Ref TokenVerificationFunction

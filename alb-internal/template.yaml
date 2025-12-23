@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+
+Resources:
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "alb-internal-${EnvironmentName}"
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Scheme: internal
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      Tags:
+        - Key: Name
+          Value: !Sub "alb-internal-${EnvironmentName}"
+
+  ALBHTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '404'
+            ContentType: text/plain
+            MessageBody: "Not Found"
+
+  HealthCheckListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBHTTPListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/health"
+      Actions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '200'
+            ContentType: text/html
+            MessageBody: |
+              <!DOCTYPE html>
+              <html>
+              <head><title>Health Check</title></head>
+              <body><h1>OK</h1><p>Service is healthy.</p></body>
+              </html>
+
+Outputs:
+  LoadBalancerARN:
+    Value: !Ref ApplicationLoadBalancer
+  LoadBalancerDNSName:
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+  LoadBalancerCanonicalHostedZoneID:
+    Value: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+  HTTPListenerARN:
+    Value: !Ref ALBHTTPListener

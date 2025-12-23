@@ -9,6 +9,23 @@ Parameters:
   LoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup::Id
     Description: Security group for the load balancer.
+  CertificateArn:
+    Type: String
+    Default: ""
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID
+    Default: ""
+  DomainName:
+    Type: String
+    Description: Domain name for the ALB (e.g., app.example.com)
+    Default: ""
+
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+  HasDomainName: !And
+    - !Not [!Equals [!Ref DomainName, ""]]
+    - !Not [!Equals [!Ref HostedZoneId, ""]]
 
 Resources:
   ApplicationLoadBalancer:
@@ -39,18 +56,33 @@ Resources:
             ContentType: text/plain
             MessageBody: "Not Found"
 
-  #ALBHTTPSListener:
-  #  Type: AWS::ElasticLoadBalancingV2::Listener
-  #  Properties:
-  #    LoadBalancerArn: !Ref ApplicationLoadBalancer
-  #    Protocol: HTTPS
-  #    Port: 443
-  #    DefaultActions:
-  #      - Type: fixed-response
-  #        FixedResponseConfig:
-  #          StatusCode: '404'
-  #          ContentType: text/plain
-  #          MessageBody: "Not Found"
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      Protocol: HTTPS
+      Port: 443
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '404'
+            ContentType: text/plain
+            MessageBody: "Not Found"
+
+  ALBDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasDomainName
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApplicationLoadBalancer.DNSName
+        HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+        EvaluateTargetHealth: true
 
 Outputs:
   LoadBalancerARN:
@@ -65,6 +97,11 @@ Outputs:
   HTTPListenerARN:
     Value: !Ref ALBHTTPListener
     Description: The ARN of the HTTP listener.
-  #HTTPSListenerARN:
-  #  Value: !Ref ALBHTTPSListener
-  #  Description: The ARN of the HTTPS listener.
+  HTTPSListenerARN:
+    Condition: HasCertificate
+    Value: !Ref HTTPSListener
+    Description: The ARN of the HTTPS listener.
+  ALBDomainName:
+    Condition: HasDomainName
+    Value: !Ref DomainName
+    Description: The custom domain name for the ALB.
