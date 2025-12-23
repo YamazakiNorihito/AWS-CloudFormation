@@ -1,4 +1,4 @@
-# aws cloudformation deploy --template-file template.yaml --stack-name ecs-fargate-keycloak --parameter-overrides file://parameters.json --capabilities CAPABILITY_NAMED_IAM
+# aws cloudformation deploy --template-file template.yaml --stack-name ecs-fargate-keycloak-nori --parameter-overrides file://parameters.json --capabilities CAPABILITY_NAMED_IAM
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Keycloak on ECS Fargate with RDS MySQL
 
@@ -247,10 +247,12 @@ Resources:
               Value: ispn
             - Name: KC_CACHE_STACK
               Value: jdbc-ping
-            - Name: KC_HOSTNAME_STRICT
-              Value: "false"
             - Name: KC_HOSTNAME
-              Value: !Ref KeycloakHostname
+              Value: !Sub "https://${KeycloakHostname}/keycloak"
+            - Name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              Value: "true"
+            - Name: KC_FEATURES
+              Value: hostname:v2
             - Name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
               Value: /keycloak
           LogConfiguration:
