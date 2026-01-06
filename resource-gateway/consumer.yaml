@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Consumer-side VPC Endpoint to access Internal ALB via Resource Gateway (service.yaml) through PrivateLink
+
+Parameters:
+  EndpointName:
+    Type: String
+    Default: vpce-keycloak
+    Description: Name for the Resource Endpoint
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID to create the Resource Endpoint
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for the Resource Endpoint (recommend multiple AZs)
+
+  ResourceConfigurationArn:
+    Type: String
+    Description: ARN of the Resource Configuration (e.g., arn:aws:vpc-lattice:us-east-1:123456789012:resourceconfiguration/rcfg-xxx)
+
+Resources:
+  #############################
+  # Security Group for Resource Endpoint
+  #############################
+  ResourceEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EndpointName}-sg'
+      GroupDescription: Security group for VPC Lattice Resource Endpoint
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS traffic
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${EndpointName}-sg'
+
+  #############################
+  # Resource Endpoint (VPC Endpoint)
+  #############################
+  ResourceEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Resource
+      VpcId: !Ref VpcId
+      SubnetIds: !Ref SubnetIds
+      SecurityGroupIds:
+        - !Ref ResourceEndpointSecurityGroup
+      ResourceConfigurationArn: !Ref ResourceConfigurationArn
+      Tags:
+        - Key: Name
+          Value: !Ref EndpointName
+
+Outputs:
+  ResourceEndpointId:
+    Description: Resource Endpoint ID
+    Value: !Ref ResourceEndpoint
+
+  SecurityGroupId:
+    Description: Security Group ID for the Resource Endpoint
+    Value: !Ref ResourceEndpointSecurityGroup

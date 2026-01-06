@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: PrivateLink Resource Configuration for Internal ALB
+
+Parameters:
+  ResourceName:
+    Type: String
+    Default: resource-gateway-service
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the Resource Gateway will be created
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for the Resource Gateway (must be in the same VPC as the Internal ALB)
+
+  AlbDnsName:
+    Type: String
+    Description: DNS name of the target Internal ALB to allow access (e.g., internal-my-alb-xxx.ap-northeast-1.elb.amazonaws.com)
+
+  AlbSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group ID of the target Internal ALB to allow access
+
+  PortRangeLower:
+    Type: Number
+    Default: 443
+    Description: Lower bound of port range
+
+  PortRangeUpper:
+    Type: Number
+    Default: 443
+    Description: Upper bound of port range
+
+  # Cross-account sharing (optional)
+  ShareWithAccountId:
+    Type: String
+    Default: ''
+    Description: AWS Account ID to share with (leave empty to skip)
+
+Conditions:
+  CreateRAMShare: !Not [!Equals [!Ref ShareWithAccountId, '']]
+
+Resources:
+  #############################
+  # Security Group for Resource Gateway
+  #############################
+  ResourceGatewaySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ResourceName}-gateway-sg'
+      GroupDescription: Security group for Resource Gateway - allows inbound traffic from external sources
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref PortRangeLower
+          ToPort: !Ref PortRangeUpper
+          CidrIp: 0.0.0.0/0
+          Description: Allow inbound traffic from external sources to ALB
+      Tags:
+        - Key: Name
+          Value: !Sub '${ResourceName}-gateway-sg'
+
+  # Allow Resource Gateway to access ALB
+  AlbSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AlbSecurityGroupId
+      IpProtocol: tcp
+      FromPort: !Ref PortRangeLower
+      ToPort: !Ref PortRangeUpper
+      SourceSecurityGroupId: !Ref ResourceGatewaySecurityGroup
+      Description: Allow traffic from Resource Gateway
+
+  # Resource Gateway
+  ResourceGateway:
+    Type: AWS::VpcLattice::ResourceGateway
+    Properties:
+      Name: !Sub '${ResourceName}-gateway'
+      VpcIdentifier: !Ref VpcId
+      SubnetIds: !Ref SubnetIds
+      SecurityGroupIds:
+        - !Ref ResourceGatewaySecurityGroup
+      IpAddressType: IPV4
+      Tags:
+        - Key: Name
+          Value: !Sub '${ResourceName}-gateway'
+
+  # Resource Configuration
+  ResourceConfiguration:
+    Type: AWS::VpcLattice::ResourceConfiguration
+    Properties:
+      AllowAssociationToSharableServiceNetwork: true
+      #CustomDomainName: String
+      #DomainVerificationId: String
+      #GroupDomain: String
+      Name: !Ref ResourceName
+      PortRanges:
+        - '443'
+      ProtocolType: TCP
+      #ResourceConfigurationAuthType: String
+      ResourceConfigurationDefinition:
+        DnsResource:
+          DomainName: !Ref AlbDnsName
+          IpAddressType: IPV4
+      #ResourceConfigurationGroupId: String
+      ResourceConfigurationType: SINGLE
+      ResourceGatewayId: !Ref ResourceGateway
+      Tags:
+        - Key: Name
+          Value: !Ref ResourceName
+
+  # RAM Resource Share (optional - for cross-account sharing)
+  ResourceShare:
+    Type: AWS::RAM::ResourceShare
+    Condition: CreateRAMShare
+    Properties:
+      Name: !Sub '${ResourceName}-share'
+      ResourceArns:
+        - !GetAtt ResourceConfiguration.Arn
+      Principals:
+        - !Ref ShareWithAccountId
+      AllowExternalPrincipals: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${ResourceName}-share'
